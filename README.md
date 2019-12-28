@@ -15,14 +15,14 @@ TODO: show some nices examples
 
 In development, feel free to join! Main features and future roadmap:
 
-[x] Parse OSM data
-[x] Generate and serialize graph
-[x] Ensure the network is strongly-connected
-[ ] Document graph generation process
-[ ] Load stored data
-[ ] Create shortest-path API
-[ ] Create parallel distance matrix API
-[ ] Improve serialized data format
+- [x] Parse OSM data
+- [x] Generate and serialize graph
+- [x] Ensure the network is strongly-connected
+- [ ] Document graph generation process
+- [ ] Load stored data
+- [ ] Create shortest-path API
+- [ ] Create parallel distance matrix API
+- [ ] Improve serialized data format
 
 ## Usage
 
