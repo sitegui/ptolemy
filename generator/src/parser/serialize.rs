@@ -32,27 +32,60 @@ pub fn serialize<P: AsRef<Path>>(graph: &Graph, dir_path: P) -> io::Result<Stats
     lvl_writer.write_u32::<LittleEndian>(graph.edge_len() as u32)?;
 
     // Write node coordinates
-    let mut latitudes: Vec<i32> = Vec::with_capacity(graph.node_len());
-    for (_, node_info) in graph.graph.node_references() {
-        let node_id = node_info.id;
-        let osm_node = graph.nodes[node_id];
-        crd_writer.write_i32::<LittleEndian>((osm_node.lon * 1e6) as i32)?;
-        latitudes.push((osm_node.lat * 1e6) as i32);
+    struct Node {
+        index: i32,
+        lon: i32,
+        lat: i32,
     }
-    for lat in latitudes {
-        crd_writer.write_i32::<LittleEndian>(lat)?;
+    let mut nodes: Vec<Node> = graph
+        .graph
+        .node_references()
+        .map(|(node_index, node_info)| {
+            let node_id = node_info.id;
+            let osm_node = graph.nodes[node_id];
+            let lon = (osm_node.lon * 1e3) as i32;
+            let lat = (osm_node.lat * 1e3) as i32;
+            Node {
+                index: node_index.index() as i32,
+                lon,
+                lat,
+            }
+        })
+        .collect();
+    nodes.sort_by_key(|node| (node.lon, node.lat));
+    let mut index_map: Vec<i32> = vec![std::i32::MIN; graph.node_len()];
+    for (i, node) in nodes.iter().enumerate() {
+        index_map[node.index as usize] = i as i32;
     }
+    write_i32_deltas(&mut crd_writer, nodes.iter().map(|x| x.lon).collect())?;
+    write_i32_deltas(&mut crd_writer, nodes.iter().map(|x| x.lat).collect())?;
 
     // Write edges info
-    for edge in graph.graph.edge_references() {
-        axr_writer.write_u32::<LittleEndian>(edge.source().index() as u32)?;
-        axr_writer.write_u32::<LittleEndian>(edge.target().index() as u32)?;
-        let speed_category = 1; // TODO
-        let distance = edge.weight().distance;
-        axr_writer.write_u32::<LittleEndian>((distance << 6) + speed_category)?;
-        assert!(edge.weight().road_level <= 6);
-        lvl_writer.write_u8(edge.weight().road_level)?;
+    struct Edge {
+        source: i32,
+        target: i32,
+        dist_cat: i32,
+        level: i8,
     }
+    let mut edges: Vec<Edge> = graph
+        .graph
+        .edge_references()
+        .map(|edge| {
+            let speed_category = 1; // TODO
+            let distance = edge.weight().distance as i32;
+            Edge {
+                source: index_map[edge.source().index()],
+                target: index_map[edge.target().index()],
+                dist_cat: (distance << 6) + speed_category,
+                level: edge.weight().road_level as i8,
+            }
+        })
+        .collect();
+    edges.sort_by_key(|e| (e.source, e.target));
+    write_i32_deltas(&mut axr_writer, edges.iter().map(|e| e.source).collect())?;
+    write_i32_deltas(&mut axr_writer, edges.iter().map(|e| e.target).collect())?;
+    write_i32_deltas(&mut axr_writer, edges.iter().map(|e| e.dist_cat).collect())?;
+    write_i8_deltas(&mut lvl_writer, edges.iter().map(|e| e.level).collect())?;
     drop(crd_writer);
     drop(axr_writer);
     drop(lvl_writer);
@@ -62,4 +95,50 @@ pub fn serialize<P: AsRef<Path>>(graph: &Graph, dir_path: P) -> io::Result<Stats
         axr_size: metadata(axr_path)?.len(),
         lvl_size: metadata(lvl_path)?.len(),
     })
+}
+
+fn write_i32_values<W: std::io::Write>(file: &mut W, values: Vec<i32>) -> io::Result<()> {
+    for v in values {
+        file.write_i32::<LittleEndian>(v)?;
+    }
+    Ok(())
+}
+
+fn write_i8_values<W: std::io::Write>(file: &mut W, values: Vec<i8>) -> io::Result<()> {
+    for v in values {
+        file.write_i8(v)?;
+    }
+    Ok(())
+}
+
+fn write_i32_deltas<W: std::io::Write>(file: &mut W, values: Vec<i32>) -> io::Result<()> {
+    // Write first
+    let mut it = values.into_iter();
+    let mut prev = it.next().unwrap();
+    file.write_i32::<LittleEndian>(prev)?;
+
+    // Write others
+    for v in it {
+        let delta = v - prev;
+        file.write_i32::<LittleEndian>(delta)?;
+        prev = v;
+    }
+
+    Ok(())
+}
+
+fn write_i8_deltas<W: std::io::Write>(file: &mut W, values: Vec<i8>) -> io::Result<()> {
+    // Write first
+    let mut it = values.into_iter();
+    let mut prev = it.next().unwrap();
+    file.write_i8(prev)?;
+
+    // Write others
+    for v in it {
+        let delta = v - prev;
+        file.write_i8(delta)?;
+        prev = v;
+    }
+
+    Ok(())
 }
