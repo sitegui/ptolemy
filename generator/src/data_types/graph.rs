@@ -26,7 +26,7 @@ impl<'a> Graph<'a> {
 
     /// Add a new arc to the graph. If the arc already exists, keep the highest road level and
     /// least distance. This happens quite a bit with roundabouts that are not correctly tagged
-    pub fn push_arc(&mut self, from: NodeId, to: NodeId, road_level: u8, distance: u32, way: i64) {
+    pub fn push_arc(&mut self, from: NodeId, to: NodeId, road_level: u8, distance: u32) {
         let index_from = self.ensure_node(from);
         let index_to = self.ensure_node(to);
 
@@ -41,7 +41,6 @@ impl<'a> Graph<'a> {
                 EdgeInfo {
                     road_level,
                     distance,
-                    way,
                 },
             );
         }
@@ -149,7 +148,6 @@ impl<'a> Graph<'a> {
             let info = EdgeInfo {
                 distance,
                 road_level: 5,
-                way: -1,
             };
             self.graph.add_edge(node_index, base_index, info);
             self.graph.add_edge(base_index, node_index, info);
@@ -194,5 +192,4 @@ pub struct EdgeInfo {
     pub road_level: u8,
     /// Distance in meters
     pub distance: u32,
-    pub way: i64,
 }

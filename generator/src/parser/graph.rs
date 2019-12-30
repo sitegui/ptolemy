@@ -25,7 +25,6 @@ struct Arc {
     to: NodeId,
     road_level: u8,
     distance: u32,
-    way: i64,
 }
 
 /// Parse the raw ways from a given compressed blob
@@ -84,7 +83,6 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
                         to: node_id,
                         road_level,
                         distance: distance as u32,
-                        way: way.id(),
                     });
                 }
                 if direction.reverse {
@@ -93,7 +91,6 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
                         to: seg_start.id,
                         road_level,
                         distance: distance as u32,
-                        way: way.id(),
                     });
                 }
             }
@@ -115,7 +112,7 @@ fn parse_blobs_sequential<'a>(
     let mut graph = Graph::new(nodes);
     for blob in blobs {
         for arc in parse_blob(blob, nodes, junctions) {
-            graph.push_arc(arc.from, arc.to, arc.road_level, arc.distance, arc.way);
+            graph.push_arc(arc.from, arc.to, arc.road_level, arc.distance);
         }
     }
     graph
@@ -157,7 +154,7 @@ fn parse_blobs_parallel<'a>(
         let mut graph = Graph::new(nodes);
         for arcs in result_receiver {
             for arc in arcs {
-                graph.push_arc(arc.from, arc.to, arc.road_level, arc.distance, arc.way);
+                graph.push_arc(arc.from, arc.to, arc.road_level, arc.distance);
             }
         }
         graph
