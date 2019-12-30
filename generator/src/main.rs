@@ -19,7 +19,7 @@ struct Opt {
     #[structopt(short, long, parse(from_os_str))]
     input: PathBuf,
 
-    /// Output directory. Will be created if needed
+    /// Output file. Usually with the extension `.ptolemy`
     #[structopt(short, long, parse(from_os_str))]
     output: PathBuf,
 }
@@ -28,9 +28,11 @@ fn main() {
     let mut timer = DebugTime::new();
     let opt = Opt::from_args();
 
+    // Detect threads
     let num_threads = opt.threads.unwrap_or(num_cpus::get());
     timer.msg(format!("Will use {} threads", num_threads));
 
+    // Read input file
     let reader = BlobReader::from_path(&opt.input).unwrap();
     let size = fs::metadata(&opt.input).unwrap().len();
     let blobs: Vec<_> = reader.map(Result::unwrap).collect();
@@ -40,6 +42,7 @@ fn main() {
         format_bytes(size)
     ));
 
+    // Load nodes info
     let inital_len = blobs.len();
     let (nodes, blobs) = parser::node::parse_blobs(blobs, num_threads);
     timer.msg(format!(
@@ -49,6 +52,7 @@ fn main() {
         format_num(inital_len - blobs.len())
     ));
 
+    // Load ways info to detect junctions
     let junctions = parser::junction::parse_blobs(&blobs, &nodes, num_threads);
     timer.msg(format!("Loaded {} ways", format_num(junctions.ways_len())));
     timer.msg(format!(
@@ -56,6 +60,7 @@ fn main() {
         format_num(junctions.len()),
     ));
 
+    // Load ways again to create arcs
     let mut graph = parser::graph::parse_blobs(&blobs, &nodes, &junctions, num_threads);
     timer.msg(format!(
         "Create graph with {} nodes and {} edges",
@@ -63,6 +68,7 @@ fn main() {
         format_num(graph.edge_len())
     ));
 
+    // Prune nodes
     let node_len = graph.node_len();
     let edge_len = graph.edge_len();
     graph.retain_reachable_nodes(2);
@@ -75,6 +81,7 @@ fn main() {
         format_num(edge_len - graph.edge_len())
     ));
 
+    // Connect weakly-connected components
     let edge_len = graph.edge_len();
     graph.fix_dead_ends();
     timer.msg("Weakly-connected components were strongly connected");
@@ -84,6 +91,7 @@ fn main() {
         format_num(graph.edge_len() - edge_len)
     ));
 
+    // Connect all components
     let edge_len = graph.edge_len();
     graph.strongly_connect();
     timer.msg("All smaller components were strongly connected with the main one");
@@ -93,11 +101,14 @@ fn main() {
         format_num(graph.edge_len() - edge_len)
     ));
 
-    let stats = parser::serialize::serialize(&graph, opt.output).unwrap();
-    timer.msg("Wrote results to the disk");
-    timer.msg(format!("AXR file = {}", format_bytes(stats.axr_size)));
-    timer.msg(format!("CRD file = {}", format_bytes(stats.crd_size)));
-    timer.msg(format!("LVL file = {}", format_bytes(stats.lvl_size)));
+    // Serialize
+    let output_path = opt.output;
+    parser::serialize::serialize(&graph, &output_path).unwrap();
+    timer.msg(format!(
+        "Wrote results to {}, size = {}",
+        output_path.display(),
+        format_bytes(fs::metadata(&output_path).unwrap().len())
+    ));
 
     timer.msg("Done! #DFTBA");
 }

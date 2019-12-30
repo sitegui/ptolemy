@@ -1,65 +1,97 @@
 use crate::data_types::*;
 use byteorder::{LittleEndian, WriteBytesExt};
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
-use std::fs::{create_dir_all, metadata, File};
+use std::fs::File;
 use std::io;
-use std::io::BufWriter;
+use std::io::Write;
 use std::path::Path;
 
-pub struct Stats {
-    pub crd_size: u64,
-    pub axr_size: u64,
-    pub lvl_size: u64,
-}
-
-/// Write the final cartography graph to disk, using the historical format.
-/// See README.md for the explanation of it.
-pub fn serialize<P: AsRef<Path>>(graph: &Graph, dir_path: P) -> io::Result<Stats> {
-    // Open files
-    create_dir_all(dir_path.as_ref())?;
-    let crd_path = dir_path.as_ref().join("GRAPHE.CRD");
-    let axr_path = dir_path.as_ref().join("GRAPHE.AXR");
-    let lvl_path = dir_path.as_ref().join("GRAPHE.LVL");
-    let mut crd_writer = BufWriter::new(File::create(&crd_path)?);
-    let mut axr_writer = BufWriter::new(File::create(&axr_path)?);
-    let mut lvl_writer = BufWriter::new(File::create(&lvl_path)?);
+/// Write the final cartography graph to disk
+pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> {
+    // Open file
+    let mut writer = ZlibEncoder::new(File::create(&file_path)?, Compression::default());
 
     // Write headers
-    crd_writer.write_u32::<LittleEndian>(graph.node_len() as u32)?;
-    axr_writer.write_u32::<LittleEndian>(graph.node_len() as u32)?;
-    axr_writer.write_u32::<LittleEndian>(graph.edge_len() as u32)?;
-    axr_writer.write_u32::<LittleEndian>(100)?;
-    lvl_writer.write_u32::<LittleEndian>(graph.edge_len() as u32)?;
+    writer.write_u32::<LittleEndian>(graph.node_len() as u32)?;
+    writer.write_u32::<LittleEndian>(graph.edge_len() as u32)?;
 
-    // Write node coordinates
-    let mut latitudes: Vec<i32> = Vec::with_capacity(graph.node_len());
-    for (_, node_info) in graph.graph.node_references() {
-        let node_id = node_info.id;
-        let osm_node = graph.nodes[node_id];
-        crd_writer.write_i32::<LittleEndian>((osm_node.lon * 1e6) as i32)?;
-        latitudes.push((osm_node.lat * 1e6) as i32);
+    // Extract nodes and sort by (lat, lon)
+    // This code uses delta encoding, so we use i32 instead of u32, even though
+    // the original data is guaranteed to be non-negative
+    struct Node {
+        index: i32,
+        lat: i32,
+        lon: i32,
     }
-    for lat in latitudes {
-        crd_writer.write_i32::<LittleEndian>(lat)?;
+    let mut nodes: Vec<Node> = graph
+        .graph
+        .node_references()
+        .map(|(index, info)| {
+            let node_id = info.id;
+            let osm_node = graph.nodes[node_id];
+            Node {
+                index: index.index() as i32,
+                lat: (osm_node.lat * 1e6) as i32,
+                lon: (osm_node.lon * 1e6) as i32,
+            }
+        })
+        .collect();
+    nodes.sort_by_key(|node| (node.lat, node.lon));
+
+    // Write node info
+    write_delta_encode(&mut writer, nodes.iter().map(|node| node.lat))?;
+    write_delta_encode(&mut writer, nodes.iter().map(|node| node.lon))?;
+
+    // Extract remap of node indexes:
+    // node_index_map[old_index] = new_index
+    let mut node_index_map = vec![std::i32::MAX; graph.node_len()];
+    for (i, node) in nodes.iter().enumerate() {
+        node_index_map[node.index as usize] = i as i32;
     }
 
-    // Write edges info
-    for edge in graph.graph.edge_references() {
-        axr_writer.write_u32::<LittleEndian>(edge.source().index() as u32)?;
-        axr_writer.write_u32::<LittleEndian>(edge.target().index() as u32)?;
-        let speed_category = 1; // TODO
-        let distance = edge.weight().distance;
-        axr_writer.write_u32::<LittleEndian>((distance << 6) + speed_category)?;
-        assert!(edge.weight().road_level <= 6);
-        lvl_writer.write_u8(edge.weight().road_level)?;
+    // Extract edges and sort by (source, target)
+    struct Edge {
+        source: i32,
+        target: i32,
+        distance: i32,
+        road_level: i32,
     }
-    drop(crd_writer);
-    drop(axr_writer);
-    drop(lvl_writer);
+    let mut edges: Vec<Edge> = graph
+        .graph
+        .edge_references()
+        .map(|edge| Edge {
+            source: node_index_map[edge.source().index()],
+            target: node_index_map[edge.target().index()],
+            distance: edge.weight().distance as i32,
+            road_level: edge.weight().road_level as i32,
+        })
+        .collect();
+    edges.sort_by_key(|edge| (edge.source, edge.target));
 
-    Ok(Stats {
-        crd_size: metadata(crd_path)?.len(),
-        axr_size: metadata(axr_path)?.len(),
-        lvl_size: metadata(lvl_path)?.len(),
-    })
+    // Write edges
+    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.source))?;
+    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.target))?;
+    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.distance))?;
+    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.road_level))?;
+
+    // Finish
+    writer.finish()?;
+    Ok(())
+}
+
+/// Delta-encode the values and write them
+fn write_delta_encode<IT: Iterator<Item = i32>, W: Write>(
+    writer: &mut W,
+    mut values: IT,
+) -> io::Result<()> {
+    let mut prev = values.next().unwrap();
+    writer.write_i32::<LittleEndian>(prev)?;
+    for value in values {
+        let delta = value - prev;
+        prev = value;
+        writer.write_i32::<LittleEndian>(delta)?;
+    }
+    Ok(())
 }
