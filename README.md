@@ -22,7 +22,7 @@ In development, feel free to join! Main features and future roadmap:
 - [ ] Load stored data
 - [ ] Create shortest-path API
 - [ ] Create parallel distance matrix API
-- [ ] Improve serialized data format
+- [x] Improve serialized data format
 
 ## Usage
 

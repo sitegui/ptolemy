@@ -1,6 +1,7 @@
 mod sampler;
 
 use byteorder::{LittleEndian, ReadBytesExt};
+use flate2::read::GzDecoder;
 use petgraph::{
     algo::kosaraju_scc,
     graph::{EdgeIndex, NodeIndex},
@@ -14,8 +15,7 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::prelude::*;
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Represents each in the cartography graph. It is inserted into the petgraph structure
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -32,7 +32,6 @@ pub struct Node {
 #[derive(Clone, Copy)]
 pub struct Edge {
     pub distance: u32,
-    pub road_category: u8,
     pub road_level: u8,
 }
 
@@ -65,13 +64,40 @@ impl Hash for EdgeElement {
 }
 
 impl Cartography {
-    /// Create a cartography struct by reading the files from a given directory
-    pub fn open<P: AsRef<Path>>(dir_path: P) -> io::Result<Cartography> {
-        // Read files from disk and build the graph
+    /// Create a cartography struct by reading the Ptolemy file
+    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Cartography> {
+        // Open file and read header
+        let mut file = GzDecoder::new(File::open(path)?);
+        let num_nodes = file.read_u32::<LittleEndian>()? as usize;
+        let num_edges = file.read_u32::<LittleEndian>()? as usize;
+        // Read nodes and insert into graph
         let mut graph = Graph::new();
-        Cartography::read_crd(dir_path.as_ref().join("GRAPHE.CRD"), &mut graph)?;
-        Cartography::read_axr(dir_path.as_ref().join("GRAPHE.AXR"), &mut graph)?;
-        Cartography::read_lvl(dir_path.as_ref().join("GRAPHE.LVL"), &mut graph)?;
+        let latitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
+        let longitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
+        for (lat, lon) in latitudes.into_iter().zip(longitudes.into_iter()) {
+            graph.add_node(Node::new(lat as f32 / 1e6, lon as f32 / 1e6));
+        }
+
+        // Read edges and insert into graph
+        let sources = Cartography::read_delta_encoded(&mut file, num_edges)?;
+        let targets = Cartography::read_delta_encoded(&mut file, num_edges)?;
+        let distances = Cartography::read_delta_encoded(&mut file, num_edges)?;
+        let road_levels = Cartography::read_delta_encoded(&mut file, num_edges)?;
+        for (((source, target), distance), road_level) in sources
+            .into_iter()
+            .zip(targets.into_iter())
+            .zip(distances.into_iter())
+            .zip(road_levels.into_iter())
+        {
+            graph.add_edge(
+                NodeIndex::new(source as usize),
+                NodeIndex::new(target as usize),
+                Edge {
+                    distance: distance as u32,
+                    road_level: road_level as u8,
+                },
+            );
+        }
 
         // Build spacial index
         let edge_elements: Vec<EdgeElement> = graph
@@ -145,75 +171,22 @@ impl Cartography {
         kosaraju_scc(&self.graph)
     }
 
-    /// Read nodes from the coordinates file, creating them in the final graph
-    fn read_crd(path: PathBuf, graph: &mut Graph) -> io::Result<()> {
-        let mut file = BufReader::new(File::open(path)?);
-        let num_nodes = file.read_u32::<LittleEndian>()?;
+    /// Read a list of delta-encoded values
+    fn read_delta_encoded<R: Read>(reader: &mut R, len: usize) -> io::Result<Vec<i32>> {
+        let mut result = Vec::with_capacity(len);
 
-        let longitudes = Cartography::read_coordinates(&mut file, num_nodes, 180.)?;
-        let latitudes = Cartography::read_coordinates(&mut file, num_nodes, 90.)?;
+        // Read first
+        let mut prev = reader.read_i32::<LittleEndian>()?;
+        result.push(prev);
 
-        for (lat, lon) in latitudes.into_iter().zip(longitudes.into_iter()) {
-            graph.add_node(Node::new(lat, lon));
-        }
-        Ok(())
-    }
-
-    /// Read a run of single coordinates (either latitude or longitude) from the given file,
-    /// advancing the read pointer as needed
-    fn read_coordinates<R: Read>(file: &mut R, num: u32, range: f32) -> io::Result<Vec<f32>> {
-        (0..num)
-            .map(|_| {
-                // The raw value is the actual coordinates times one million
-                let raw = file.read_i32::<LittleEndian>()?;
-                let value = raw as f32 / 1e6;
-                assert!(value >= -range);
-                assert!(value <= range);
-                Ok(value)
-            })
-            .collect()
-    }
-
-    /// Read the edges basic information and create them in the final graph
-    fn read_axr(path: PathBuf, graph: &mut Graph) -> io::Result<()> {
-        let mut file = BufReader::new(File::open(path)?);
-        let num_nodes = file.read_u32::<LittleEndian>()?;
-        assert_eq!(num_nodes, graph.node_count() as u32);
-        let num_edges = file.read_u32::<LittleEndian>()?;
-        let _distance_factor = file.read_u32::<LittleEndian>()?;
-
-        for _ in 0..num_edges {
-            let source = NodeIndex::new(file.read_u32::<LittleEndian>()? as usize);
-            let target = NodeIndex::new(file.read_u32::<LittleEndian>()? as usize);
-            // distance_road_category = distance:26 | road_category:6
-            let distance_road_category = file.read_u32::<LittleEndian>()?;
-
-            graph.add_edge(
-                source,
-                target,
-                Edge {
-                    distance: distance_road_category >> 6,
-                    road_category: (distance_road_category & 0b11_1111) as u8,
-                    road_level: 0,
-                },
-            );
+        // Read others
+        for _ in 1..len {
+            let delta = reader.read_i32::<LittleEndian>()?;
+            result.push(prev + delta);
+            prev += delta;
         }
 
-        Ok(())
-    }
-
-    /// Read the road level from the LVL file and update the edge weights
-    fn read_lvl(path: PathBuf, graph: &mut Graph) -> io::Result<()> {
-        let mut file = BufReader::new(File::open(path)?);
-        let num_edges = file.read_u32::<LittleEndian>()?;
-        assert_eq!(num_edges, graph.edge_count() as u32);
-
-        for edge in graph.edge_weights_mut() {
-            let lvl = file.read_u8()?;
-            assert!(lvl <= 6);
-            edge.road_level = lvl;
-        }
-        Ok(())
+        Ok(result)
     }
 }
 

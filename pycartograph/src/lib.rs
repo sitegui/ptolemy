@@ -2,9 +2,9 @@ use cartograph::Cartography as InnerCartography;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-/// Create a cartography struct by reading the files from a given directory
+/// Create a cartography struct by reading the Ptolemy file
 #[pyclass]
-#[text_signature = "(dir_path, /)"]
+#[text_signature = "(file_path, /)"]
 struct Cartography {
     inner: InnerCartography,
 }
@@ -12,8 +12,8 @@ struct Cartography {
 #[pymethods]
 impl Cartography {
     #[new]
-    fn new(obj: &PyRawObject, dir_path: String) -> PyResult<()> {
-        let inner = InnerCartography::open(dir_path)?;
+    fn new(obj: &PyRawObject, file_path: String) -> PyResult<()> {
+        let inner = InnerCartography::open(file_path)?;
         Ok(obj.init(Cartography { inner }))
     }
 

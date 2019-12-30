@@ -1,6 +1,6 @@
 use crate::data_types::*;
 use byteorder::{LittleEndian, WriteBytesExt};
-use flate2::write::ZlibEncoder;
+use flate2::write::GzEncoder;
 use flate2::Compression;
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
 use std::fs::File;
@@ -11,7 +11,7 @@ use std::path::Path;
 /// Write the final cartography graph to disk
 pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> {
     // Open file
-    let mut writer = ZlibEncoder::new(File::create(&file_path)?, Compression::default());
+    let mut writer = GzEncoder::new(File::create(&file_path)?, Compression::default());
 
     // Write headers
     writer.write_u32::<LittleEndian>(graph.node_len() as u32)?;
