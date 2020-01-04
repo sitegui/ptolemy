@@ -50,6 +50,7 @@ impl Angle {
     pub fn from_micro_degrees(a: i32) -> Self {
         Self(a)
     }
+
     pub fn from_degrees(a: f64) -> Self {
         Self((a * 1e6).round() as i32)
     }
@@ -89,6 +90,15 @@ impl GeoPoint {
             lat: Angle::from_micro_degrees(lat),
             lon: Angle::from_micro_degrees(lon),
         }
+    }
+
+    /// Reverse the web_mercator_project() operation
+    pub fn from_web_mercator([easting, northing]: [f64; 2]) -> Self {
+        let a = 6_378_137.;
+        let pi = std::f64::consts::PI;
+        let lon_rad = easting / a;
+        let lat_rad = 2. * (northing / a).exp().atan() - pi / 2.;
+        Self::from_degrees(lat_rad.to_degrees(), lon_rad.to_degrees())
     }
 
     /// Return the projection of the point using Web Mercator coordinates
@@ -146,19 +156,23 @@ mod test {
 
     #[test]
     fn point() {
-        let zero = GeoPoint::from_degrees(0., 0.);
         let a = GeoPoint::from_degrees(36.12, -86.67);
         let b = GeoPoint::from_degrees(33.94, -118.4);
 
         assert_eq!(a.haversine_distance(&a).round(), 0.);
         assert_eq!(a.haversine_distance(&b).round(), 2886444.);
 
-        let [x, y] = zero.web_mercator_project();
-        assert_f64_similar(x, 0., 1e-6);
-        assert_f64_similar(y, 0., 1e-6);
+        for &(lat, target_y) in &[(-36.12, -4317145.77), (0., 0.), (36.12, 4317145.77)] {
+            for &(lon, target_x) in &[(86.67, 9648060.27), (0., 0.), (-86.67, -9648060.27)] {
+                let p = GeoPoint::from_degrees(lat, lon);
+                let [x, y] = p.web_mercator_project();
+                let p2 = GeoPoint::from_web_mercator([x, y]);
 
-        let [x, y] = a.web_mercator_project();
-        assert_f64_similar(x, -9648060.27, 1e-2);
-        assert_f64_similar(y, 4317145.77, 1e-2);
+                assert_f64_similar(x, target_x, 1e-2);
+                assert_f64_similar(y, target_y, 1e-2);
+                assert_f64_similar(p2.lat.as_degrees(), p.lat.as_degrees(), 1e-6);
+                assert_f64_similar(p2.lon.as_degrees(), p.lon.as_degrees(), 1e-6);
+            }
+        }
     }
 }

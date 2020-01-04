@@ -10,6 +10,7 @@ use petgraph::{
     algo::kosaraju_scc,
     graph::{EdgeIndex, NodeIndex},
     visit::EdgeRef,
+    Graph,
 };
 use rstar::{RTree, AABB};
 use sampler::PrioritySample;
@@ -20,8 +21,10 @@ use std::io::prelude::*;
 use std::path::Path;
 
 pub struct Cartography {
-    pub graph: Graph,
-    pub rtree: RTree<EdgeElement>,
+    /// The road map graph
+    pub graph: Graph<GeoPoint, EdgeInfo>,
+    /// The edges of the graph spacially indexed
+    pub rtree: RTree<LineWithData<EdgeIndex, [f64; 2]>>,
 }
 
 impl Cartography {
@@ -37,8 +40,7 @@ impl Cartography {
         let latitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
         let longitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
         for (lat, lon) in latitudes.into_iter().zip(longitudes.into_iter()) {
-            let point = GeoPoint::from_micro_degrees(lat, lon);
-            graph.add_node(Node::new(point));
+            graph.add_node(GeoPoint::from_micro_degrees(lat, lon));
         }
 
         // Read edges and insert into graph
@@ -55,7 +57,7 @@ impl Cartography {
             graph.add_edge(
                 NodeIndex::new(source as usize),
                 NodeIndex::new(target as usize),
-                Edge {
+                EdgeInfo {
                     distance: distance as u32,
                     road_level: road_level as u8,
                 },
@@ -63,16 +65,16 @@ impl Cartography {
         }
 
         // Build spacial index
-        let edge_elements: Vec<EdgeElement> = graph
+        let edge_elements: Vec<LineWithData<EdgeIndex, [f64; 2]>> = graph
             .edge_references()
             .map(|edge| {
                 let source_node = graph[edge.source()];
                 let target_node = graph[edge.target()];
-                EdgeElement {
-                    index: edge.id(),
-                    envelope: AABB::from_corners(source_node, target_node),
-                    road_level: edge.weight().road_level,
-                }
+                LineWithData::new(
+                    edge.id(),
+                    source_node.web_mercator_project(),
+                    target_node.web_mercator_project(),
+                )
             })
             .collect();
         let rtree = RTree::bulk_load(edge_elements);
@@ -86,27 +88,20 @@ impl Cartography {
     /// The returned values is a map from road_level to a list of edge indexes
     pub fn sample_edges<'a>(
         &'a self,
-        xy1: (f64, f64),
-        xy2: (f64, f64),
+        xy1: [f64; 2],
+        xy2: [f64; 2],
         max_num: usize,
     ) -> BTreeMap<u8, Vec<EdgeIndex>> {
         // Build search envelope (only x and y coordinates are needed)
-        let n1 = Node {
-            point: GeoPoint::from_degrees(0., 0.),
-            x: xy1.0,
-            y: xy1.1,
-        };
-        let n2 = Node {
-            point: GeoPoint::from_degrees(0., 0.),
-            x: xy2.0,
-            y: xy2.1,
-        };
-        let envelope = AABB::from_corners(n1, n2);
+        let envelope = AABB::from_corners(xy1, xy2);
 
         let sampled = self
             .rtree
             .locate_in_envelope_intersecting(&envelope)
-            .sample_with_priority(max_num, |edge| -(edge.road_level as i32));
+            .sample_with_priority(max_num, |r_tree_element| {
+                let edge = self.graph[r_tree_element.data];
+                -(edge.road_level as i32)
+            });
 
         // Convert from interval RTree representation to a more API-friendly return
         sampled
@@ -114,14 +109,14 @@ impl Cartography {
             .map(|(priority, elements)| {
                 (
                     -priority as u8,
-                    elements.into_iter().map(|e| e.index).collect(),
+                    elements.into_iter().map(|e| e.data).collect(),
                 )
             })
             .collect()
     }
 
     /// Return the full information about a given edge index
-    pub fn edge_info(&self, edge: EdgeIndex) -> (&Edge, &Node, &Node) {
+    pub fn edge_info(&self, edge: EdgeIndex) -> (&EdgeInfo, &GeoPoint, &GeoPoint) {
         let weight = &self.graph[edge];
         let endpoints = self.graph.edge_endpoints(edge).unwrap();
         (weight, &self.graph[endpoints.0], &self.graph[endpoints.1])
@@ -132,8 +127,31 @@ impl Cartography {
         kosaraju_scc(&self.graph)
     }
 
-    pub fn reverse_geocode(&self) -> Option<EdgeIndex> {
-        todo!()
+    /// Find the arc that is closest to a given point. This is usually the first step before being able to
+    /// walk the graph searching for shortest paths.
+    pub fn project(&self, point: GeoPoint) -> Option<ProjectedPoint> {
+        let xy = point.web_mercator_project();
+        self.rtree.nearest_neighbor(&xy).map(|r_tree_element| {
+            // Convert result to GeoPoint
+            let projected = GeoPoint::from_web_mercator(r_tree_element.nearest_point(&xy));
+            // Get source and target geo points
+            let edge_index = r_tree_element.data;
+            let (source, target) = self.graph.edge_endpoints(edge_index).unwrap();
+            let source = self.graph[source];
+            let target = self.graph[target];
+
+            // Calculate the ratio over the edge where the result is
+            let dist_to_source = projected.haversine_distance(&source);
+            let dist_to_target = projected.haversine_distance(&target);
+            let edge_pos = (dist_to_source / (dist_to_source + dist_to_target)) as f32;
+
+            ProjectedPoint {
+                original: point,
+                projected,
+                edge: edge_index,
+                edge_pos,
+            }
+        })
     }
 
     /// Read a list of delta-encoded values
