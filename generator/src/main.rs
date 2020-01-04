@@ -33,7 +33,8 @@ fn main() {
     timer.msg(format!("Will use {} threads", num_threads));
 
     // Read input file
-    let reader = BlobReader::from_path(&opt.input).unwrap();
+    let mmap = unsafe { Mmap::from_path(&opt.input).unwrap() };
+    let reader = MmapBlobReader::new(&mmap);
     let size = fs::metadata(&opt.input).unwrap().len();
     let blobs: Vec<_> = reader.map(Result::unwrap).collect();
     timer.msg(format!(

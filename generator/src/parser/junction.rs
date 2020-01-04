@@ -3,11 +3,11 @@
 
 use crate::data_types::*;
 use crossbeam;
-use osmpbf::{Blob, BlobDecode};
+use osmpbf::{BlobDecode, MmapBlob};
 
 /// Extract the nodes from a list of blobs, sequentially.
 /// Returns the junctions storage
-pub fn parse_blobs<'a>(blobs: &[Blob], nodes: &'a Nodes, num_threads: usize) -> Junctions<'a> {
+pub fn parse_blobs<'a>(blobs: &[MmapBlob], nodes: &'a Nodes, num_threads: usize) -> Junctions<'a> {
     if num_threads == 1 {
         parse_blobs_sequential(blobs, nodes)
     } else {
@@ -16,7 +16,7 @@ pub fn parse_blobs<'a>(blobs: &[Blob], nodes: &'a Nodes, num_threads: usize) -> 
 }
 
 /// Parse the raw ways from a given compressed blob
-fn parse_blob(blob: &Blob, builder: &mut JunctionsBuilder) {
+fn parse_blob(blob: &MmapBlob, builder: &mut JunctionsBuilder) {
     match blob.decode().unwrap() {
         BlobDecode::OsmData(block) => {
             for group in block.groups() {
@@ -32,7 +32,7 @@ fn parse_blob(blob: &Blob, builder: &mut JunctionsBuilder) {
     }
 }
 
-fn parse_blobs_sequential<'a>(blobs: &[Blob], nodes: &'a Nodes) -> Junctions<'a> {
+fn parse_blobs_sequential<'a>(blobs: &[MmapBlob], nodes: &'a Nodes) -> Junctions<'a> {
     let mut builder = JunctionsBuilder::new(&nodes);
     for blob in blobs {
         parse_blob(blob, &mut builder);
@@ -41,7 +41,7 @@ fn parse_blobs_sequential<'a>(blobs: &[Blob], nodes: &'a Nodes) -> Junctions<'a>
 }
 
 fn parse_blobs_parallel<'a, 'b>(
-    blobs: &'b [Blob],
+    blobs: &'b [MmapBlob],
     nodes: &'a Nodes,
     num_threads: usize,
 ) -> Junctions<'a> {

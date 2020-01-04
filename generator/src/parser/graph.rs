@@ -3,11 +3,11 @@
 
 use crate::data_types::*;
 use crossbeam;
-use osmpbf::{Blob, BlobDecode, Way};
+use osmpbf::{BlobDecode, MmapBlob, Way};
 
 /// Build the roadmap graph
 pub fn parse_blobs<'a>(
-    blobs: &[Blob],
+    blobs: &[MmapBlob],
     nodes: &'a Nodes,
     junctions: &'a Junctions<'a>,
     num_threads: usize,
@@ -28,7 +28,7 @@ struct Arc {
 }
 
 /// Parse the raw ways from a given compressed blob
-fn parse_blob<'a>(blob: &Blob, nodes: &'a Nodes, junctions: &'a Junctions<'a>) -> Vec<Arc> {
+fn parse_blob<'a>(blob: &MmapBlob, nodes: &'a Nodes, junctions: &'a Junctions<'a>) -> Vec<Arc> {
     let mut arcs = Vec::new();
     match blob.decode().unwrap() {
         BlobDecode::OsmData(block) => {
@@ -105,7 +105,7 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
 }
 
 fn parse_blobs_sequential<'a>(
-    blobs: &[Blob],
+    blobs: &[MmapBlob],
     nodes: &'a Nodes,
     junctions: &'a Junctions<'a>,
 ) -> Graph<'a> {
@@ -119,7 +119,7 @@ fn parse_blobs_sequential<'a>(
 }
 
 fn parse_blobs_parallel<'a>(
-    blobs: &[Blob],
+    blobs: &[MmapBlob],
     nodes: &'a Nodes,
     junctions: &'a Junctions<'a>,
     num_threads: usize,

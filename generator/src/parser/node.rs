@@ -4,7 +4,7 @@
 use crate::data_types::*;
 use crossbeam;
 use crossbeam::atomic::AtomicCell;
-use osmpbf::{Blob, BlobDecode};
+use osmpbf::{BlobDecode, MmapBlob};
 use std::sync::Arc;
 
 const NODES_PER_PAGE: usize = 1_000_000;
@@ -12,7 +12,7 @@ const NODES_PER_INDEX: usize = 10_000;
 
 /// Extract the nodes from a list of blobs, sequentially.
 /// Returns the nodes storage and the blobs that were not fully consumed
-pub fn parse_blobs(blobs: Vec<Blob>, num_threads: usize) -> (Nodes, Vec<Blob>) {
+pub fn parse_blobs(blobs: Vec<MmapBlob>, num_threads: usize) -> (Nodes, Vec<MmapBlob>) {
     if num_threads == 1 {
         parse_blobs_sequential(blobs)
     } else {
@@ -23,7 +23,7 @@ pub fn parse_blobs(blobs: Vec<Blob>, num_threads: usize) -> (Nodes, Vec<Blob>) {
 /// Parse the raw nodes (in normal or dense form) from a given compressed blob.
 /// If the blob was not fully consumed, that is, there are other non-node entities in it,
 /// it will be returned back
-fn parse_blob(blob: Blob) -> (Vec<Node>, Option<Blob>) {
+fn parse_blob(blob: MmapBlob) -> (Vec<Node>, Option<MmapBlob>) {
     let mut nodes = Vec::new();
     match blob.decode().unwrap() {
         BlobDecode::OsmData(block) => {
@@ -66,7 +66,7 @@ fn parse_blob(blob: Blob) -> (Vec<Node>, Option<Blob>) {
     }
 }
 
-fn parse_blobs_sequential(blobs: Vec<Blob>) -> (Nodes, Vec<Blob>) {
+fn parse_blobs_sequential(blobs: Vec<MmapBlob>) -> (Nodes, Vec<MmapBlob>) {
     let mut builder = NodesBuilder::new(NODES_PER_PAGE, NODES_PER_INDEX);
     let mut other_blobs = Vec::new();
 
@@ -83,7 +83,10 @@ fn parse_blobs_sequential(blobs: Vec<Blob>) -> (Nodes, Vec<Blob>) {
     (builder.build(), other_blobs)
 }
 
-fn parse_blobs_parallel(blobs: Vec<Blob>, num_threads: usize) -> (Nodes, Vec<Blob>) {
+fn parse_blobs_parallel<'a>(
+    blobs: Vec<MmapBlob<'a>>,
+    num_threads: usize,
+) -> (Nodes, Vec<MmapBlob<'a>>) {
     crossbeam::scope(|scope| {
         // Create a work queue that will be filled once by this thread and will be
         // consumed by the worker ones. A task is the sequence number and a blob
@@ -94,11 +97,11 @@ fn parse_blobs_parallel(blobs: Vec<Blob>, num_threads: usize) -> (Nodes, Vec<Blo
         drop(task_sender);
 
         // Create a return channel, that will be used to return the created nodes of each blob
-        struct TaskResult {
+        struct TaskResult<'a> {
             seq: usize,
             nodes: Vec<Node>,
             // Present if not fully consumed
-            blob: Option<Blob>,
+            blob: Option<MmapBlob<'a>>,
         }
         let (result_sender, result_receiver) = crossbeam::bounded::<TaskResult>(2 * num_threads);
 
@@ -137,7 +140,7 @@ fn parse_blobs_parallel(blobs: Vec<Blob>, num_threads: usize) -> (Nodes, Vec<Blo
 
         // Consume the results and push then in order to the storage builder
         let mut builder = NodesBuilder::new(NODES_PER_PAGE, NODES_PER_INDEX);
-        let mut other_blobs: Vec<Blob> = Vec::new();
+        let mut other_blobs: Vec<MmapBlob> = Vec::new();
         let mut out_of_order: Vec<TaskResult> = Vec::new();
         let mut next_seq = 0;
         for res in result_receiver {
