@@ -21,4 +21,4 @@ flate2 = "1.0.13"
 
 [workspace]
 
-members = ["py_binding"]
+members = []

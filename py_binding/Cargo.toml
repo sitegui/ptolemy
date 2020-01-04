@@ -1,5 +1,5 @@
 [package]
-name = "pycartograph"
+name = "py_binding"
 version = "0.1.0"
 authors = ["Guilherme <sitegui@sitegui.com.br>"]
 edition = "2018"
@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 pyo3 = {version = "0.8.1", features = ["extension-module"]}
-ptolemy = {path = "../"}
+ptolemy = {path = "../ptolemy"}
 
 [lib]
 name = "cartograph"

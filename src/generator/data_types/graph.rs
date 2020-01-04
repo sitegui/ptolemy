@@ -123,7 +123,10 @@ impl<'a> Graph<'a> {
                 .into_iter()
                 .map(|base_index| {
                     let base_id = self.graph[base_index].id;
-                    PointWithData::new((base_index, base_id), self.nodes[base_id].xy())
+                    PointWithData::new(
+                        (base_index, base_id),
+                        self.nodes[base_id].point.web_mercator_project(),
+                    )
                 })
                 .collect(),
         );
@@ -136,9 +139,14 @@ impl<'a> Graph<'a> {
                     // Detect the best arc from this node
                     let node_id = self.graph[node_index].id;
                     let osm_node = self.nodes[node_id];
-                    let (base_index, base_id) =
-                        base_index.nearest_neighbor(&osm_node.xy()).unwrap().data;
-                    let distance = osm_node.distance(&self.nodes[base_id]) as u32;
+                    let (base_index, base_id) = base_index
+                        .nearest_neighbor(&osm_node.point.web_mercator_project())
+                        .unwrap()
+                        .data;
+                    let distance = osm_node
+                        .point
+                        .haversine_distance(&self.nodes[base_id].point)
+                        as u32;
                     (distance, node_index, base_index)
                 })
                 .min_by_key(|t| t.0)

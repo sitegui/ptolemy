@@ -1,4 +1,6 @@
-use cartograph::Cartography as InnerCartography;
+extern crate ptolemy;
+
+use ptolemy::Cartography as InnerCartography;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -24,8 +26,8 @@ impl Cartography {
     pub fn sample_edges(
         &self,
         py: Python,
-        xy1: (f32, f32),
-        xy2: (f32, f32),
+        xy1: (f64, f64),
+        xy2: (f64, f64),
         max_num: usize,
     ) -> PyResult<PyObject> {
         // Get edges

@@ -1,3 +1,4 @@
+mod cartograph;
 mod generator;
 mod utils;
 

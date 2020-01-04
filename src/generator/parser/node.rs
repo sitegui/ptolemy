@@ -2,6 +2,7 @@
 //! into a node storage data structure
 
 use crate::generator::data_types::*;
+use crate::utils::GeoPoint;
 use crossbeam;
 use crossbeam::atomic::AtomicCell;
 use osmpbf::{BlobDecode, MmapBlob};
@@ -36,8 +37,7 @@ fn parse_blob(blob: MmapBlob) -> (Vec<OSMNode>, Option<MmapBlob>) {
                     has_nodes = true;
                     nodes.push(OSMNode {
                         id: node.id(),
-                        lat: Angle::from_degrees(node.lat()),
-                        lon: Angle::from_degrees(node.lon()),
+                        point: GeoPoint::from_degrees(node.lat(), node.lon()),
                         barrier: super::parse_barrier(node.tags()),
                     });
                 }
@@ -46,8 +46,7 @@ fn parse_blob(blob: MmapBlob) -> (Vec<OSMNode>, Option<MmapBlob>) {
                     has_nodes = true;
                     nodes.push(OSMNode {
                         id: dense_node.id,
-                        lat: Angle::from_degrees(dense_node.lat()),
-                        lon: Angle::from_degrees(dense_node.lon()),
+                        point: GeoPoint::from_degrees(dense_node.lat(), dense_node.lon()),
                         barrier: super::parse_barrier(dense_node.tags()),
                     });
                 }

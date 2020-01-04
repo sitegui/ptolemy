@@ -3,6 +3,7 @@ mod sampler;
 
 use data_types::*;
 
+use crate::utils::GeoPoint;
 use byteorder::{LittleEndian, ReadBytesExt};
 use flate2::read::GzDecoder;
 use petgraph::{
@@ -36,7 +37,8 @@ impl Cartography {
         let latitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
         let longitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
         for (lat, lon) in latitudes.into_iter().zip(longitudes.into_iter()) {
-            graph.add_node(Node::new(lat as f32 / 1e6, lon as f32 / 1e6));
+            let point = GeoPoint::from_micro_degrees(lat, lon);
+            graph.add_node(Node::new(point));
         }
 
         // Read edges and insert into graph
@@ -84,20 +86,18 @@ impl Cartography {
     /// The returned values is a map from road_level to a list of edge indexes
     pub fn sample_edges<'a>(
         &'a self,
-        xy1: (f32, f32),
-        xy2: (f32, f32),
+        xy1: (f64, f64),
+        xy2: (f64, f64),
         max_num: usize,
     ) -> BTreeMap<u8, Vec<EdgeIndex>> {
         // Build search envelope (only x and y coordinates are needed)
         let n1 = Node {
-            lat: 0.,
-            lon: 0.,
+            point: GeoPoint::from_degrees(0., 0.),
             x: xy1.0,
             y: xy1.1,
         };
         let n2 = Node {
-            lat: 0.,
-            lon: 0.,
+            point: GeoPoint::from_degrees(0., 0.),
             x: xy2.0,
             y: xy2.1,
         };

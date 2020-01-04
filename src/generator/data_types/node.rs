@@ -1,75 +1,25 @@
 use super::diskvec::DiskVec;
+use crate::utils::GeoPoint;
 use std::mem::replace;
 use std::ops::Range;
 use std::ops::{Index, IndexMut};
 
 pub type OSMNodeId = i64;
 
-/// Represent an angle in degrees with 1e-6 precision
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub struct Angle(i32);
-
-impl Angle {
-    pub fn from_degrees(a: f64) -> Self {
-        Self((a / 1e6).round() as i32)
-    }
-
-    pub fn as_degrees(&self) -> f64 {
-        self.0 as f64 * 1e6
-    }
-
-    pub fn as_radians(&self) -> f64 {
-        self.as_degrees().to_radians()
-    }
-
-    pub fn as_micro_degrees(&self) -> i32 {
-        self.0
-    }
-}
-
 /// Represent a basic OSM node, with some parsed fields
 #[derive(Copy, Clone, Debug)]
 pub struct OSMNode {
     pub id: OSMNodeId,
-    pub lat: Angle,
-    pub lon: Angle,
+    pub point: GeoPoint,
     pub barrier: bool,
 }
 
 impl OSMNode {
-    /// Get the Haversine distance in meters from this node to another one
-    pub fn distance(&self, other: &OSMNode) -> f64 {
-        // Based on https://en.wikipedia.org/wiki/Haversine_formula and
-        // https://github.com/georust/geo/blob/de873f9ec74ffb08d27d78be689a4a9e0891879f/geo/src/algorithm/haversine_distance.rs#L42-L52
-        let theta1 = self.lat.as_radians();
-        let theta2 = other.lat.as_radians();
-        let delta_theta = other.lat.as_radians() - self.lat.as_radians();
-        let delta_lambda = other.lon.as_radians() - self.lon.as_radians();
-        let a = (delta_theta / 2.).sin().powi(2)
-            + theta1.cos() * theta2.cos() * (delta_lambda / 2.).sin().powi(2);
-        let c = 2. * a.sqrt().asin();
-        6_371_000.0 * c
-    }
-
-    /// Projects the given (longitude, latitude) values into Web Mercator
-    /// coordinates (meters East of Greenwich and meters North of the Equator).
-    /// While not ideal, I think it is better than using (lat, lon) coordinates to get the closest point
-    pub fn xy(&self) -> [f64; 2] {
-        // Copied from https://github.com/holoviz/datashader/blob/5f2b6080227914c332d07ee04be5420350b89db0/datashader/utils.py#L363-L388
-        let pi = std::f64::consts::PI;
-        let origin_shift = pi * 6378137.;
-        let easting = self.lon.as_degrees() * origin_shift / 180.0;
-        let northing =
-            (((90. + self.lat.as_degrees()) * pi / 360.0).tan()).ln() * origin_shift / pi;
-        [easting, northing]
-    }
-
     #[cfg(test)]
     pub fn with_id(id: OSMNodeId) -> OSMNode {
         OSMNode {
             id,
-            lat: Angle::from_degrees(0.),
-            lon: Angle::from_degrees(0.),
+            point: GeoPoint::from_degrees(0., 0.),
             barrier: false,
         }
     }
@@ -286,23 +236,6 @@ mod test {
             builder.push(OSMNode::with_id(id));
         }
         builder.build()
-    }
-
-    #[test]
-    fn distance() {
-        let a = OSMNode {
-            id: 0,
-            lat: Angle::from_degrees(36.12),
-            lon: Angle::from_degrees(-86.67),
-            barrier: false,
-        };
-        let b = OSMNode {
-            id: 1,
-            lat: Angle::from_degrees(33.94),
-            lon: Angle::from_degrees(-118.4),
-            barrier: false,
-        };
-        assert_eq!(a.distance(&b).round(), 2886444.);
     }
 
     #[test]
