@@ -129,7 +129,7 @@ impl Cartography {
 
     /// Find the arc that is closest to a given point. This is usually the first step before being able to
     /// walk the graph searching for shortest paths.
-    pub fn project(&self, point: GeoPoint) -> Option<ProjectedPoint> {
+    pub fn project(&self, point: &GeoPoint) -> Option<ProjectedPoint> {
         let xy = point.web_mercator_project();
         self.rtree.nearest_neighbor(&xy).map(|r_tree_element| {
             // Convert result to GeoPoint
@@ -146,7 +146,7 @@ impl Cartography {
             let edge_pos = (dist_to_source / (dist_to_source + dist_to_target)) as f32;
 
             ProjectedPoint {
-                original: point,
+                original: point.clone(),
                 projected,
                 edge: edge_index,
                 edge_pos,
@@ -170,5 +170,47 @@ impl Cartography {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn get_carto() -> Cartography {
+        Cartography::open("test_data/andorra.ptolemy").unwrap()
+    }
+
+    #[test]
+    fn open() {
+        let carto = get_carto();
+        assert_eq!(carto.graph.node_count(), 3124);
+        assert_eq!(carto.graph.edge_count(), 5831);
+        assert_eq!(carto.rtree.size(), carto.graph.edge_count());
+        assert_eq!(carto.strongly_connected_components().len(), 1);
+    }
+
+    #[test]
+    fn project() {
+        let carto = get_carto();
+
+        // Project to a road nearby
+        let p = GeoPoint::from_degrees(42.552221, 1.586691);
+        let res = carto.project(&p).unwrap();
+        assert_eq!(res.original, p);
+        assert_eq!(res.projected, GeoPoint::from_degrees(42.553210, 1.588908));
+        assert_eq!(res.edge, EdgeIndex::new(4199));
+        assert_eq!(res.edge_pos, 0.1256024);
+        assert_eq!(
+            res.original.haversine_distance(&res.projected),
+            212.3022254769895
+        );
+
+        // Project to source node
+        let source = carto.graph[carto.graph.edge_endpoints(res.edge).unwrap().0];
+        let res_source = carto.project(&source).unwrap();
+        assert_eq!(res_source.projected, source);
+        assert_eq!(res_source.edge, res.edge);
+        assert_eq!(res_source.edge_pos, 0.);
     }
 }
