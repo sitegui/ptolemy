@@ -100,3 +100,42 @@ pub fn generate<P: AsRef<Path>>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_generate_single_thread() {
+        generate(
+            Some(1),
+            "test_data/andorra-latest.osm.pbf",
+            "data/andorra-single-thread.ptolemy",
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::metadata("data/andorra-single-thread.ptolemy")
+                .unwrap()
+                .len(),
+            37345
+        );
+    }
+
+    #[test]
+    fn test_generate_multi_thread() {
+        generate(
+            Some(4),
+            "test_data/andorra-latest.osm.pbf",
+            "data/andorra-multi-thread.ptolemy",
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::metadata("data/andorra-multi-thread.ptolemy")
+                .unwrap()
+                .len(),
+            37345
+        );
+    }
+}
