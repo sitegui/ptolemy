@@ -1,5 +1,5 @@
 use super::diskvec::DiskVec;
-use super::node::{NodeId, Nodes};
+use super::node::{Nodes, OSMNodeId};
 use petgraph;
 use petgraph::algo::kosaraju_scc;
 use petgraph::visit::{EdgeRef, VisitMap};
@@ -26,7 +26,7 @@ impl<'a> Graph<'a> {
 
     /// Add a new arc to the graph. If the arc already exists, keep the highest road level and
     /// least distance. This happens quite a bit with roundabouts that are not correctly tagged
-    pub fn push_arc(&mut self, from: NodeId, to: NodeId, road_level: u8, distance: u32) {
+    pub fn push_arc(&mut self, from: OSMNodeId, to: OSMNodeId, road_level: u8, distance: u32) {
         let index_from = self.ensure_node(from);
         let index_to = self.ensure_node(to);
 
@@ -168,7 +168,7 @@ impl<'a> Graph<'a> {
     }
 
     /// Ensure the node is part of the graph and return its index
-    fn ensure_node(&mut self, id: NodeId) -> NodeIndex {
+    fn ensure_node(&mut self, id: OSMNodeId) -> NodeIndex {
         let offset = self.nodes.offset(id).unwrap();
         let mut idx = self.node_indexes[offset];
         if idx == NodeIndex::end() {
@@ -183,7 +183,7 @@ impl<'a> Graph<'a> {
 /// Extra data associated to each node
 #[derive(Copy, Clone, Debug)]
 pub struct NodeInfo {
-    pub id: NodeId,
+    pub id: OSMNodeId,
 }
 
 /// Extra data associated to each edge

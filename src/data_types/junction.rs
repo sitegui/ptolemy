@@ -1,5 +1,5 @@
 use super::diskvec::DiskVec;
-use crate::data_types::node::{NodeId, Nodes};
+use crate::data_types::node::{Nodes, OSMNodeId};
 use osmpbf::elements::Way;
 
 /// Helper struct to detect which nodes are junctions
@@ -112,7 +112,7 @@ pub struct Junctions<'a> {
 
 impl<'a> Junctions<'a> {
     /// Query if a given node is a junction or not
-    pub fn query(&self, id: NodeId) -> bool {
+    pub fn query(&self, id: OSMNodeId) -> bool {
         let offset = self.nodes.offset(id).unwrap();
         get_bit(&self.junctions, offset)
     }
@@ -171,7 +171,7 @@ mod test {
     fn get_nodes(num: usize) -> Nodes {
         let mut nodes_builder = NodesBuilder::new(7, 3);
         for id in 0..num as i64 {
-            nodes_builder.push(Node::with_id(id));
+            nodes_builder.push(OSMNode::with_id(id));
         }
         nodes_builder.build()
     }

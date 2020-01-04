@@ -21,8 +21,8 @@ pub fn parse_blobs<'a>(
 
 #[derive(Copy, Clone)]
 struct Arc {
-    from: NodeId,
-    to: NodeId,
+    from: OSMNodeId,
+    to: OSMNodeId,
     road_level: u8,
     distance: u32,
 }

@@ -3,7 +3,7 @@ use std::mem::replace;
 use std::ops::Range;
 use std::ops::{Index, IndexMut};
 
-pub type NodeId = i64;
+pub type OSMNodeId = i64;
 
 /// Represent an angle in degrees with 1e-6 precision
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -29,16 +29,16 @@ impl Angle {
 
 /// Represent a basic OSM node, with some parsed fields
 #[derive(Copy, Clone, Debug)]
-pub struct Node {
-    pub id: NodeId,
+pub struct OSMNode {
+    pub id: OSMNodeId,
     pub lat: Angle,
     pub lon: Angle,
     pub barrier: bool,
 }
 
-impl Node {
+impl OSMNode {
     /// Get the Haversine distance in meters from this node to another one
-    pub fn distance(&self, other: &Node) -> f64 {
+    pub fn distance(&self, other: &OSMNode) -> f64 {
         // Based on https://en.wikipedia.org/wiki/Haversine_formula and
         // https://github.com/georust/geo/blob/de873f9ec74ffb08d27d78be689a4a9e0891879f/geo/src/algorithm/haversine_distance.rs#L42-L52
         let theta1 = self.lat.as_radians();
@@ -65,8 +65,8 @@ impl Node {
     }
 
     #[cfg(test)]
-    pub fn with_id(id: NodeId) -> Node {
-        Node {
+    pub fn with_id(id: OSMNodeId) -> OSMNode {
+        OSMNode {
             id,
             lat: Angle::from_degrees(0.),
             lon: Angle::from_degrees(0.),
@@ -79,15 +79,15 @@ impl Node {
 /// This will be checked at insertion time
 pub struct NodesBuilder {
     // Store partially filled pages
-    partial_page: DiskVec<Node>,
+    partial_page: DiskVec<OSMNode>,
     partial_index: IndexEntry,
-    prev_id: NodeId,
+    prev_id: OSMNodeId,
     page_size: usize,
     index_entry_size: usize,
     len: usize,
     barrier_len: usize,
     // Store finished values
-    pages: Vec<DiskVec<Node>>,
+    pages: Vec<DiskVec<OSMNode>>,
     index: Vec<IndexEntry>,
 }
 
@@ -96,7 +96,7 @@ pub struct NodesBuilder {
 pub struct Nodes {
     /// The list of pages (note: this is not related to a "memory page")
     /// The nodes in each page are sorted in ascending order and all the pages are globally sorted as well.
-    pages: Vec<DiskVec<Node>>,
+    pages: Vec<DiskVec<OSMNode>>,
     /// An index over the node ids to allow for very fast access and also translation from node id to global offset
     index: Vec<IndexEntry>,
     len: usize,
@@ -109,7 +109,7 @@ pub struct Nodes {
 /// more ergonomic.
 #[derive(Clone, Debug)]
 struct IndexEntry {
-    min_id: NodeId,
+    min_id: OSMNodeId,
     page: usize,
     page_range: Range<usize>,
     // The total number of nodes before this entry
@@ -126,7 +126,7 @@ impl IndexEntry {
         }
     }
 
-    fn finish(&mut self, page: &DiskVec<Node>) {
+    fn finish(&mut self, page: &DiskVec<OSMNode>) {
         self.min_id = page[self.page_range.start].id;
         self.page_range.end = page.len();
     }
@@ -156,7 +156,7 @@ impl NodesBuilder {
     }
 
     /// Add a new node. Will panic if its id is not greater that all others
-    pub fn push(&mut self, node: Node) {
+    pub fn push(&mut self, node: OSMNode) {
         assert!(node.id > self.prev_id);
 
         self.prev_id = node.id;
@@ -210,14 +210,14 @@ impl NodesBuilder {
 impl Nodes {
     /// Search a node by its id
     /// You can also use nodes[node_id] if you want to panic if the node is not found
-    pub fn get(&self, id: NodeId) -> Option<&Node> {
+    pub fn get(&self, id: OSMNodeId) -> Option<&OSMNode> {
         self.search(id)
             .map(move |ans| &self.pages[ans.page][ans.page_offset])
     }
 
     /// Search a node by its id
     /// You can also use nodes[node_id] if you want to panic if the node is not found
-    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+    pub fn get_mut(&mut self, id: OSMNodeId) -> Option<&mut OSMNode> {
         self.search(id)
             .map(move |ans| &mut self.pages[ans.page][ans.page_offset])
     }
@@ -225,7 +225,7 @@ impl Nodes {
     /// Return a global offset for a given `id`. It represents the node position in the
     /// sorted list of all the ids.
     /// The offset can change when new pages are added
-    pub fn offset(&self, id: NodeId) -> Option<usize> {
+    pub fn offset(&self, id: OSMNodeId) -> Option<usize> {
         self.search(id).map(|ans| ans.global_offset)
     }
 
@@ -238,7 +238,7 @@ impl Nodes {
     }
 
     /// If this `id` exists in the storage, return the page and the offset inside it
-    fn search(&self, id: NodeId) -> Option<SearchAnswer> {
+    fn search(&self, id: OSMNodeId) -> Option<SearchAnswer> {
         // First, find which index entry could have it
         let entry_i = match self.index.binary_search_by_key(&id, |entry| entry.min_id) {
             Err(0) => {
@@ -263,15 +263,15 @@ impl Nodes {
     }
 }
 
-impl Index<NodeId> for Nodes {
-    type Output = Node;
-    fn index(&self, id: NodeId) -> &Self::Output {
+impl Index<OSMNodeId> for Nodes {
+    type Output = OSMNode;
+    fn index(&self, id: OSMNodeId) -> &Self::Output {
         self.get(id).unwrap()
     }
 }
 
-impl IndexMut<NodeId> for Nodes {
-    fn index_mut(&mut self, id: NodeId) -> &mut Self::Output {
+impl IndexMut<OSMNodeId> for Nodes {
+    fn index_mut(&mut self, id: OSMNodeId) -> &mut Self::Output {
         self.get_mut(id).unwrap()
     }
 }
@@ -283,20 +283,20 @@ mod test {
     fn build_nodes() -> Nodes {
         let mut builder = NodesBuilder::new(5, 3);
         for id in (0..300).step_by(10) {
-            builder.push(Node::with_id(id));
+            builder.push(OSMNode::with_id(id));
         }
         builder.build()
     }
 
     #[test]
     fn distance() {
-        let a = Node {
+        let a = OSMNode {
             id: 0,
             lat: Angle::from_degrees(36.12),
             lon: Angle::from_degrees(-86.67),
             barrier: false,
         };
-        let b = Node {
+        let b = OSMNode {
             id: 1,
             lat: Angle::from_degrees(33.94),
             lon: Angle::from_degrees(-118.4),
@@ -324,8 +324,8 @@ mod test {
     #[should_panic]
     fn unsorted() {
         let mut builder = NodesBuilder::new(5, 3);
-        builder.push(Node::with_id(10));
-        builder.push(Node::with_id(9));
+        builder.push(OSMNode::with_id(10));
+        builder.push(OSMNode::with_id(9));
     }
 
     #[test]

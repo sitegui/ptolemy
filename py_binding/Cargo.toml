@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 pyo3 = {version = "0.8.1", features = ["extension-module"]}
-cartograph = {path = "../cartograph"}
+ptolemy = {path = "../"}
 
 [lib]
 name = "cartograph"

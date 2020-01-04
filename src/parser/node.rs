@@ -23,7 +23,7 @@ pub fn parse_blobs(blobs: Vec<MmapBlob>, num_threads: usize) -> (Nodes, Vec<Mmap
 /// Parse the raw nodes (in normal or dense form) from a given compressed blob.
 /// If the blob was not fully consumed, that is, there are other non-node entities in it,
 /// it will be returned back
-fn parse_blob(blob: MmapBlob) -> (Vec<Node>, Option<MmapBlob>) {
+fn parse_blob(blob: MmapBlob) -> (Vec<OSMNode>, Option<MmapBlob>) {
     let mut nodes = Vec::new();
     match blob.decode().unwrap() {
         BlobDecode::OsmData(block) => {
@@ -34,7 +34,7 @@ fn parse_blob(blob: MmapBlob) -> (Vec<Node>, Option<MmapBlob>) {
 
                 for node in group.nodes() {
                     has_nodes = true;
-                    nodes.push(Node {
+                    nodes.push(OSMNode {
                         id: node.id(),
                         lat: Angle::from_degrees(node.lat()),
                         lon: Angle::from_degrees(node.lon()),
@@ -44,7 +44,7 @@ fn parse_blob(blob: MmapBlob) -> (Vec<Node>, Option<MmapBlob>) {
 
                 for dense_node in group.dense_nodes() {
                     has_nodes = true;
-                    nodes.push(Node {
+                    nodes.push(OSMNode {
                         id: dense_node.id,
                         lat: Angle::from_degrees(dense_node.lat()),
                         lon: Angle::from_degrees(dense_node.lon()),
@@ -99,7 +99,7 @@ fn parse_blobs_parallel<'a>(
         // Create a return channel, that will be used to return the created nodes of each blob
         struct TaskResult<'a> {
             seq: usize,
-            nodes: Vec<Node>,
+            nodes: Vec<OSMNode>,
             // Present if not fully consumed
             blob: Option<MmapBlob<'a>>,
         }
