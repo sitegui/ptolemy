@@ -70,3 +70,9 @@ pub struct ProjectedPoint {
     /// 0 = at source, 1 = at target
     pub edge_pos: f32,
 }
+
+#[derive(Clone, Debug)]
+pub struct GraphPath {
+    pub distance: u32,
+    pub points: Vec<GeoPoint>,
+}

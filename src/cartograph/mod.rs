@@ -7,7 +7,7 @@ use crate::utils::GeoPoint;
 use byteorder::{LittleEndian, ReadBytesExt};
 use flate2::read::GzDecoder;
 use petgraph::{
-    algo::kosaraju_scc,
+    algo::{astar, kosaraju_scc},
     graph::{EdgeIndex, NodeIndex},
     visit::EdgeRef,
     Graph,
@@ -154,6 +154,34 @@ impl Cartography {
         })
     }
 
+    pub fn shortest_path(&self, from: &ProjectedPoint, to: &ProjectedPoint) -> Option<GraphPath> {
+        // Run A* search from graph nodes
+        let start_node = self.graph.edge_endpoints(from.edge).unwrap().1;
+        let end_node = self.graph.edge_endpoints(to.edge).unwrap().0;
+        let end_node_point = self.graph[end_node];
+        let search_res = astar(
+            &self.graph,
+            start_node,
+            |node| node == end_node,
+            |edge_ref| edge_ref.weight().distance,
+            |node| self.graph[node].haversine_distance(&end_node_point) as u32,
+        );
+
+        search_res.map(|(mut distance, nodes)| {
+            // Build final sequence of geo points
+            let mut points = Vec::with_capacity(nodes.len() + 2);
+            points.push(from.projected);
+            points.extend(nodes.into_iter().map(|node| self.graph[node]));
+            points.push(to.projected);
+
+            // Add initial and final segment distances
+            distance += (self.graph[from.edge].distance as f32 * (1. - from.edge_pos)) as u32;
+            distance += (self.graph[to.edge].distance as f32 * to.edge_pos) as u32;
+
+            GraphPath { distance, points }
+        })
+    }
+
     /// Read a list of delta-encoded values
     fn read_delta_encoded<R: Read>(reader: &mut R, len: usize) -> io::Result<Vec<i32>> {
         let mut result = Vec::with_capacity(len);
@@ -212,5 +240,21 @@ mod test {
         assert_eq!(res_source.projected, source);
         assert_eq!(res_source.edge, res.edge);
         assert_eq!(res_source.edge_pos, 0.);
+    }
+
+    #[test]
+    fn shortest_path() {
+        let carto = get_carto();
+
+        let from = carto
+            .project(&GeoPoint::from_degrees(42.553210, 1.588908))
+            .unwrap();
+        let to = carto
+            .project(&GeoPoint::from_degrees(42.564440, 1.685042))
+            .unwrap();
+
+        let res = carto.shortest_path(&from, &to).unwrap();
+        assert_eq!(res.distance, 12124);
+        assert_eq!(res.points.len(), 111);
     }
 }
