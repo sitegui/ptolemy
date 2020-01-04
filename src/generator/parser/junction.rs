@@ -1,7 +1,7 @@
 //! This file implements the second step in the processes: loading the ways,
 //! detecting which nodes are junctions and creating the junction data structure
 
-use crate::data_types::*;
+use crate::generator::data_types::*;
 use crossbeam;
 use osmpbf::{BlobDecode, MmapBlob};
 

@@ -1,7 +1,7 @@
 //! This file implements the first step in the processes: reading the nodes info
 //! into a node storage data structure
 
-use crate::data_types::*;
+use crate::generator::data_types::*;
 use crossbeam;
 use crossbeam::atomic::AtomicCell;
 use osmpbf::{BlobDecode, MmapBlob};

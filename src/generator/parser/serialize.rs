@@ -1,4 +1,4 @@
-use crate::data_types::*;
+use crate::generator::data_types::*;
 use byteorder::{LittleEndian, WriteBytesExt};
 use flate2::write::GzEncoder;
 use flate2::Compression;

@@ -1,5 +1,5 @@
 use super::diskvec::DiskVec;
-use crate::data_types::node::{Nodes, OSMNodeId};
+use crate::generator::data_types::node::{Nodes, OSMNodeId};
 use osmpbf::elements::Way;
 
 /// Helper struct to detect which nodes are junctions

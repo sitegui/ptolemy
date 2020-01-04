@@ -1,7 +1,7 @@
 //! This file implements the third step in the processes: loading the ways,
 //! detecting the road segments
 
-use crate::data_types::*;
+use crate::generator::data_types::*;
 use crossbeam;
 use osmpbf::{BlobDecode, MmapBlob, Way};
 
