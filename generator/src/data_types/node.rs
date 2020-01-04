@@ -5,12 +5,34 @@ use std::ops::{Index, IndexMut};
 
 pub type NodeId = i64;
 
+/// Represent an angle in degrees with 1e-6 precision
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Angle(i32);
+
+impl Angle {
+    pub fn from_degrees(a: f64) -> Self {
+        Self((a / 1e6).round() as i32)
+    }
+
+    pub fn as_degrees(&self) -> f64 {
+        self.0 as f64 * 1e6
+    }
+
+    pub fn as_radians(&self) -> f64 {
+        self.as_degrees().to_radians()
+    }
+
+    pub fn as_micro_degrees(&self) -> i32 {
+        self.0
+    }
+}
+
 /// Represent a basic OSM node, with some parsed fields
 #[derive(Copy, Clone, Debug)]
 pub struct Node {
     pub id: NodeId,
-    pub lat: f64,
-    pub lon: f64,
+    pub lat: Angle,
+    pub lon: Angle,
     pub barrier: bool,
 }
 
@@ -19,10 +41,10 @@ impl Node {
     pub fn distance(&self, other: &Node) -> f64 {
         // Based on https://en.wikipedia.org/wiki/Haversine_formula and
         // https://github.com/georust/geo/blob/de873f9ec74ffb08d27d78be689a4a9e0891879f/geo/src/algorithm/haversine_distance.rs#L42-L52
-        let theta1 = self.lat.to_radians();
-        let theta2 = other.lat.to_radians();
-        let delta_theta = (other.lat - self.lat).to_radians();
-        let delta_lambda = (other.lon - self.lon).to_radians();
+        let theta1 = self.lat.as_radians();
+        let theta2 = other.lat.as_radians();
+        let delta_theta = other.lat.as_radians() - self.lat.as_radians();
+        let delta_lambda = other.lon.as_radians() - self.lon.as_radians();
         let a = (delta_theta / 2.).sin().powi(2)
             + theta1.cos() * theta2.cos() * (delta_lambda / 2.).sin().powi(2);
         let c = 2. * a.sqrt().asin();
@@ -36,8 +58,9 @@ impl Node {
         // Copied from https://github.com/holoviz/datashader/blob/5f2b6080227914c332d07ee04be5420350b89db0/datashader/utils.py#L363-L388
         let pi = std::f64::consts::PI;
         let origin_shift = pi * 6378137.;
-        let easting = self.lon * origin_shift / 180.0;
-        let northing = (((90. + self.lat) * pi / 360.0).tan()).ln() * origin_shift / pi;
+        let easting = self.lon.as_degrees() * origin_shift / 180.0;
+        let northing =
+            (((90. + self.lat.as_degrees()) * pi / 360.0).tan()).ln() * origin_shift / pi;
         [easting, northing]
     }
 
@@ -45,8 +68,8 @@ impl Node {
     pub fn with_id(id: NodeId) -> Node {
         Node {
             id,
-            lat: 0.,
-            lon: 0.,
+            lat: Angle::from_degrees(0.),
+            lon: Angle::from_degrees(0.),
             barrier: false,
         }
     }
@@ -269,14 +292,14 @@ mod test {
     fn distance() {
         let a = Node {
             id: 0,
-            lat: 36.12,
-            lon: -86.67,
+            lat: Angle::from_degrees(36.12),
+            lon: Angle::from_degrees(-86.67),
             barrier: false,
         };
         let b = Node {
             id: 1,
-            lat: 33.94,
-            lon: -118.4,
+            lat: Angle::from_degrees(33.94),
+            lon: Angle::from_degrees(-118.4),
             barrier: false,
         };
         assert_eq!(a.distance(&b).round(), 2886444.);

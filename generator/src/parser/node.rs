@@ -36,8 +36,8 @@ fn parse_blob(blob: MmapBlob) -> (Vec<Node>, Option<MmapBlob>) {
                     has_nodes = true;
                     nodes.push(Node {
                         id: node.id(),
-                        lat: node.lat(),
-                        lon: node.lon(),
+                        lat: Angle::from_degrees(node.lat()),
+                        lon: Angle::from_degrees(node.lon()),
                         barrier: super::parse_barrier(node.tags()),
                     });
                 }
@@ -46,8 +46,8 @@ fn parse_blob(blob: MmapBlob) -> (Vec<Node>, Option<MmapBlob>) {
                     has_nodes = true;
                     nodes.push(Node {
                         id: dense_node.id,
-                        lat: dense_node.lat(),
-                        lon: dense_node.lon(),
+                        lat: Angle::from_degrees(dense_node.lat()),
+                        lon: Angle::from_degrees(dense_node.lon()),
                         barrier: super::parse_barrier(dense_node.tags()),
                     });
                 }

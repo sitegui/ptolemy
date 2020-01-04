@@ -33,8 +33,8 @@ pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> 
             let osm_node = graph.nodes[node_id];
             Node {
                 index: index.index() as i32,
-                lat: (osm_node.lat * 1e6) as i32,
-                lon: (osm_node.lon * 1e6) as i32,
+                lat: osm_node.lat.as_micro_degrees(),
+                lon: osm_node.lon.as_micro_degrees(),
             }
         })
         .collect();
