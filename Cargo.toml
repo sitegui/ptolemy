@@ -27,4 +27,4 @@ geo-types = "0.4"
 
 [workspace]
 
-members = []
+members = ["py_ptolemy"]

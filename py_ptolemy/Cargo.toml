@@ -1,5 +1,5 @@
 [package]
-name = "py_binding"
+name = "py_ptolemy"
 version = "0.1.0"
 authors = ["Guilherme <sitegui@sitegui.com.br>"]
 edition = "2018"
@@ -8,8 +8,8 @@ edition = "2018"
 
 [dependencies]
 pyo3 = {version = "0.8.1", features = ["extension-module"]}
-ptolemy = {path = "../ptolemy"}
+ptolemy = {path = ".."}
 
 [lib]
-name = "cartograph"
+name = "ptolemy"
 crate-type = ["cdylib"]

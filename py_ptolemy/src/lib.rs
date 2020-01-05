@@ -1,22 +1,20 @@
-extern crate ptolemy;
-
-use ptolemy::Cartography as InnerCartography;
+use ptolemy::Cartograph as InnerCartograph;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 /// Create a cartography struct by reading the Ptolemy file
 #[pyclass]
 #[text_signature = "(file_path, /)"]
-struct Cartography {
-    inner: InnerCartography,
+struct Cartograph {
+    inner: InnerCartograph,
 }
 
 #[pymethods]
-impl Cartography {
+impl Cartograph {
     #[new]
     fn new(obj: &PyRawObject, file_path: String) -> PyResult<()> {
-        let inner = InnerCartography::open(file_path)?;
-        Ok(obj.init(Cartography { inner }))
+        let inner = InnerCartograph::open(file_path)?;
+        Ok(obj.init(Cartograph { inner }))
     }
 
     /// Returns a sample of the edges inside a given region, described by two opposite corners in x, y coordinates.
@@ -31,7 +29,9 @@ impl Cartography {
         max_num: usize,
     ) -> PyResult<PyObject> {
         // Get edges
-        let edges_by_level = self.inner.sample_edges(xy1, xy2, max_num);
+        let edges_by_level = self
+            .inner
+            .sample_edges([xy1.0, xy1.1], [xy2.0, xy2.1], max_num);
 
         // Transform each level into a HoloViews Path dict
         let result = PyDict::new(py);
@@ -41,11 +41,13 @@ impl Cartography {
             let y = PyList::empty(py);
             for edge_index in edges {
                 let (_edge, source, target) = self.inner.edge_info(edge_index);
-                x.append(source.x)?;
-                x.append(target.x)?;
+                let source = source.web_mercator_project();
+                let target = target.web_mercator_project();
+                x.append(source[0])?;
+                x.append(target[0])?;
                 x.append(std::f32::NAN)?;
-                y.append(source.y)?;
-                y.append(target.y)?;
+                y.append(source[1])?;
+                y.append(target[1])?;
                 y.append(std::f32::NAN)?;
             }
 
@@ -71,8 +73,8 @@ impl Cartography {
 
 /// This module is a python module implemented in Rust.
 #[pymodule]
-fn cartograph(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<Cartography>()?;
+fn ptolemy(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<Cartograph>()?;
 
     Ok(())
 }
