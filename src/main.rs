@@ -1,3 +1,4 @@
+mod api;
 mod cartograph;
 mod generator;
 mod utils;
@@ -37,6 +38,6 @@ fn main() {
             input,
             output,
         } => generator::generate(threads, input, output).unwrap(),
-        _ => unimplemented!(),
+        Ptolemy::Api { input } => api::run_api().unwrap(),
     }
 }
