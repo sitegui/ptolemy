@@ -1247,6 +1247,7 @@ dependencies = [
  "petgraph",
  "rayon",
  "rstar",
+ "serde",
  "structopt",
  "tempfile",
 ]

@@ -20,16 +20,16 @@ use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 
-pub struct Cartography {
+pub struct Cartograph {
     /// The road map graph
     pub graph: Graph<GeoPoint, EdgeInfo>,
     /// The edges of the graph spacially indexed
     pub rtree: RTree<LineWithData<EdgeIndex, [f64; 2]>>,
 }
 
-impl Cartography {
+impl Cartograph {
     /// Create a cartography struct by reading the Ptolemy file
-    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Cartography> {
+    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Cartograph> {
         // Open file and read header
         let mut file = GzDecoder::new(File::open(path)?);
         let num_nodes = file.read_u32::<LittleEndian>()? as usize;
@@ -37,17 +37,17 @@ impl Cartography {
 
         // Read nodes and insert into graph
         let mut graph = Graph::new();
-        let latitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
-        let longitudes = Cartography::read_delta_encoded(&mut file, num_nodes)?;
+        let latitudes = Cartograph::read_delta_encoded(&mut file, num_nodes)?;
+        let longitudes = Cartograph::read_delta_encoded(&mut file, num_nodes)?;
         for (lat, lon) in latitudes.into_iter().zip(longitudes.into_iter()) {
             graph.add_node(GeoPoint::from_micro_degrees(lat, lon));
         }
 
         // Read edges and insert into graph
-        let sources = Cartography::read_delta_encoded(&mut file, num_edges)?;
-        let targets = Cartography::read_delta_encoded(&mut file, num_edges)?;
-        let distances = Cartography::read_delta_encoded(&mut file, num_edges)?;
-        let road_levels = Cartography::read_delta_encoded(&mut file, num_edges)?;
+        let sources = Cartograph::read_delta_encoded(&mut file, num_edges)?;
+        let targets = Cartograph::read_delta_encoded(&mut file, num_edges)?;
+        let distances = Cartograph::read_delta_encoded(&mut file, num_edges)?;
+        let road_levels = Cartograph::read_delta_encoded(&mut file, num_edges)?;
         for (((source, target), distance), road_level) in sources
             .into_iter()
             .zip(targets.into_iter())
@@ -79,7 +79,7 @@ impl Cartography {
             .collect();
         let rtree = RTree::bulk_load(edge_elements);
 
-        Ok(Cartography { graph, rtree })
+        Ok(Cartograph { graph, rtree })
     }
 
     /// Returns a sample of the edges inside a given region, described by two opposite corners in x, y coordinates.
@@ -205,8 +205,8 @@ impl Cartography {
 mod test {
     use super::*;
 
-    fn get_carto() -> Cartography {
-        Cartography::open("test_data/andorra.ptolemy").unwrap()
+    fn get_carto() -> Cartograph {
+        Cartograph::open("test_data/andorra.ptolemy").unwrap()
     }
 
     #[test]

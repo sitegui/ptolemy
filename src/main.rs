@@ -38,6 +38,6 @@ fn main() {
             input,
             output,
         } => generator::generate(threads, input, output).unwrap(),
-        Ptolemy::Api { input } => api::run_api().unwrap(),
+        Ptolemy::Api { input } => api::run_api(input).unwrap(),
     }
 }

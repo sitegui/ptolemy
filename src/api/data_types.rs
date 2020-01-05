@@ -1,5 +1,6 @@
 use crate::utils::GeoPoint;
 use failure::Fail;
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::fmt;
 use std::num::ParseFloatError;
 use std::str::FromStr;
@@ -108,6 +109,18 @@ impl FromStr for Coordinates {
     }
 }
 
+// Allow Coordinates to be read directly from actix-web extractor, giving better
+// error handling in case of parsing failure
+impl<'de> Deserialize<'de> for Coordinates {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        FromStr::from_str(&s).map_err(de::Error::custom)
+    }
+}
+
 // Coordinates -> String
 impl fmt::Display for Coordinates {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -121,6 +134,24 @@ impl fmt::Display for Coordinates {
 
         Ok(())
     }
+}
+
+#[derive(Serialize)]
+pub struct RouteResponse {
+    pub waypoints: Vec<WaypointResponse>,
+    pub routes: Vec<RouteItemResponse>,
+}
+
+#[derive(Serialize)]
+pub struct WaypointResponse {
+    pub location: [f64; 2],
+    pub distance: f64,
+}
+
+#[derive(Serialize)]
+pub struct RouteItemResponse {
+    pub distance: f64,
+    pub geometry: String,
 }
 
 #[cfg(test)]

@@ -21,6 +21,7 @@ flate2 = "1.0.13"
 actix-web = "2.0"
 actix-rt = "1.0"
 failure = "0.1.6"
+serde = "1.0"
 
 [workspace]
 
