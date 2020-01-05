@@ -756,6 +756,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "geo-types"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "866e8f6dbd2218b05ea8a25daa1bfac32b0515fe7e0a37cb6a7b9ed0ed82a07e"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1168,6 +1177,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5894c618ce612a3fa23881b152b608bafb8c56cfc22f434a3ba3120b40f7b587"
 
 [[package]]
+name = "polyline"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3dde8e65050e2b2f24ccfefa8e3eebd8ddcda15b8f1898ce201a1fc6769c5cfc"
+dependencies = [
+ "geo-types",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1241,10 +1259,12 @@ dependencies = [
  "crossbeam",
  "failure",
  "flate2",
+ "geo-types",
  "memmap",
  "num_cpus",
  "osmpbf",
  "petgraph",
+ "polyline",
  "rayon",
  "rstar",
  "serde",
