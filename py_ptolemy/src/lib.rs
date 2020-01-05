@@ -1,4 +1,5 @@
 use ptolemy::Cartograph as InnerCartograph;
+use ptolemy::GeoPoint;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -17,11 +18,31 @@ impl Cartograph {
         Ok(obj.init(Cartograph { inner }))
     }
 
-    /// Returns a sample of the edges inside a given region, described by two opposite corners in x, y coordinates.
+    /// Convert a (lat, lon) point to (x, y) coordinates, used by Geoviews
+    #[staticmethod]
+    #[text_signature = "(latlon, /)"]
+    pub fn web_mercator(latlon: (f64, f64)) -> (f64, f64) {
+        let xy = GeoPoint::from_degrees(latlon.0, latlon.1).web_mercator_project();
+        (xy[0], xy[1])
+    }
+
+    /// Convert from (x, y) coordinates, as used by Geoviews, to (lat, lon).
+    /// Note that some methods in this class use the (lat, lon) format, so do not forget to
+    /// use this when interfacing with Geoviews.
+    /// As a general rule, the ones that finish with `_wm` use the Web Mercator (this is the case for some methods that
+    /// were designed to be used mostly with Geoviews)
+    #[staticmethod]
+    #[text_signature = "(xy, /)"]
+    pub fn inverse_web_mercator(xy: (f64, f64)) -> (f64, f64) {
+        let p = GeoPoint::from_web_mercator([xy.0, xy.1]);
+        (p.lat.as_degrees(), p.lon.as_degrees())
+    }
+
+    /// Returns a sample of the edges inside a given region, described by two opposite corners in (lat, lon) coordinates.
     /// This function can return less than `max_num` even when there are more than that, please refer to the
     ///  PrioritySample trait to understand how sampling works
     #[text_signature = "(xy1, xy2, max_num, /)"]
-    pub fn sample_edges(
+    pub fn sample_edges_wm(
         &self,
         py: Python,
         xy1: (f64, f64),
@@ -69,6 +90,25 @@ impl Cartograph {
             .map(|indexes| indexes.into_iter().map(|i| i.index() as u32).collect())
             .collect()
     }
+
+    /// Compute the shortest path between two points, expressed in (lat, lon)
+    #[text_signature = "(from, to, /)"]
+    pub fn shortest_path(&self, from: (f64, f64), to: (f64, f64)) -> Option<RoutePath> {
+        // Project nodes
+        let from = self
+            .inner
+            .project(&GeoPoint::from_degrees(from.0, from.1))
+            .unwrap();
+        let to = self
+            .inner
+            .project(&GeoPoint::from_degrees(to.0, to.1))
+            .unwrap();
+
+        self.inner.shortest_path(&from, &to).map(|res| RoutePath {
+            distance: res.distance,
+            geometry: res.polyline,
+        })
+    }
 }
 
 /// This module is a python module implemented in Rust.
@@ -77,4 +117,16 @@ fn ptolemy(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Cartograph>()?;
 
     Ok(())
+}
+
+/// Represent the a route path found
+#[pyclass]
+#[derive(Debug)]
+struct RoutePath {
+    /// The route distance in meters
+    #[pyo3(get)]
+    pub distance: u32,
+    /// The shape of the route, encoded as a polyline
+    #[pyo3(get)]
+    pub geometry: String,
 }

@@ -150,7 +150,7 @@ pub struct WaypointResponse {
 
 #[derive(Serialize)]
 pub struct RouteItemResponse {
-    pub distance: f64,
+    pub distance: u32,
     pub geometry: String,
 }
 

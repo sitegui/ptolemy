@@ -10,5 +10,6 @@ dependencies:
   - bokeh=1.2.0
   - geoviews=1.6.2
   - autopep8=1.4.4
+  - polyline=1.4.0
   - pip:
       - maturin==0.7.7

@@ -3,7 +3,7 @@ mod sampler;
 
 use data_types::*;
 
-use crate::utils::GeoPoint;
+use crate::utils::*;
 use byteorder::{LittleEndian, ReadBytesExt};
 use flate2::read::GzDecoder;
 use petgraph::{
@@ -20,16 +20,20 @@ use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 
+pub use data_types::GraphPath;
+
 pub struct Cartograph {
     /// The road map graph
     pub graph: Graph<GeoPoint, EdgeInfo>,
-    /// The edges of the graph spacially indexed
+    /// The edges of the graph spatially indexed
     pub rtree: RTree<LineWithData<EdgeIndex, [f64; 2]>>,
 }
 
 impl Cartograph {
     /// Create a cartography struct by reading the Ptolemy file
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Cartograph> {
+        let mut timer = crate::utils::DebugTime::new();
+
         // Open file and read header
         let mut file = GzDecoder::new(File::open(path)?);
         let num_nodes = file.read_u32::<LittleEndian>()? as usize;
@@ -42,6 +46,7 @@ impl Cartograph {
         for (lat, lon) in latitudes.into_iter().zip(longitudes.into_iter()) {
             graph.add_node(GeoPoint::from_micro_degrees(lat, lon));
         }
+        timer.msg(format!("Read {} nodes", format_num(num_nodes)));
 
         // Read edges and insert into graph
         let sources = Cartograph::read_delta_encoded(&mut file, num_edges)?;
@@ -63,8 +68,9 @@ impl Cartograph {
                 },
             );
         }
+        timer.msg(format!("Read {} edges", format_num(num_edges)));
 
-        // Build spacial index
+        // Build spatial index
         let edge_elements: Vec<LineWithData<EdgeIndex, [f64; 2]>> = graph
             .edge_references()
             .map(|edge| {
@@ -77,7 +83,10 @@ impl Cartograph {
                 )
             })
             .collect();
+        timer.msg("Projected edges");
+
         let rtree = RTree::bulk_load(edge_elements);
+        timer.msg("Created spatial index");
 
         Ok(Cartograph { graph, rtree })
     }
@@ -154,6 +163,7 @@ impl Cartograph {
         })
     }
 
+    /// Find the shortest path between two projected points. Use project() to generate them
     pub fn shortest_path(&self, from: &ProjectedPoint, to: &ProjectedPoint) -> Option<GraphPath> {
         // Run A* search from graph nodes
         let start_node = self.graph.edge_endpoints(from.edge).unwrap().1;
@@ -178,7 +188,7 @@ impl Cartograph {
             distance += (self.graph[from.edge].distance as f32 * (1. - from.edge_pos)) as u32;
             distance += (self.graph[to.edge].distance as f32 * to.edge_pos) as u32;
 
-            GraphPath { distance, points }
+            GraphPath::new(distance, points)
         })
     }
 

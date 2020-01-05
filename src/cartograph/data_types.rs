@@ -1,5 +1,7 @@
 use crate::utils::GeoPoint;
+use geo_types::Coordinate;
 use petgraph::graph::EdgeIndex;
+use polyline::encode_coordinates;
 use rstar::{primitives::Line, Envelope, Point, PointDistance, RTreeObject, AABB};
 use std::hash::{Hash, Hasher};
 
@@ -75,4 +77,26 @@ pub struct ProjectedPoint {
 pub struct GraphPath {
     pub distance: u32,
     pub points: Vec<GeoPoint>,
+    /// A polyline-encoded string of the points vector, with precision 5
+    pub polyline: String,
+}
+
+impl GraphPath {
+    /// Build a new graph path, encoding the polyline from the points
+    pub fn new(distance: u32, points: Vec<GeoPoint>) -> Self {
+        let polyline = encode_coordinates(
+            points.iter().map(|point| Coordinate {
+                x: point.lon.as_degrees(),
+                y: point.lat.as_degrees(),
+            }),
+            5,
+        )
+        .unwrap();
+
+        Self {
+            distance,
+            points,
+            polyline,
+        }
+    }
 }
