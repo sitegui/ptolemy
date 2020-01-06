@@ -9,12 +9,13 @@ use flate2::read::GzDecoder;
 use petgraph::{
     algo::{astar, kosaraju_scc},
     graph::{EdgeIndex, NodeIndex},
-    visit::EdgeRef,
+    visit::{EdgeRef, VisitMap, Visitable},
     Graph,
 };
 use rstar::{RTree, AABB};
 use sampler::PrioritySample;
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -185,10 +186,114 @@ impl Cartograph {
         points.push(to.projected);
 
         // Add initial and final segment distances
-        distance += (self.graph[from.edge].distance as f32 * (1. - from.edge_pos)) as u32;
-        distance += (self.graph[to.edge].distance as f32 * to.edge_pos) as u32;
+        let extra_start_cost =
+            (self.graph[from.edge].distance as f32 * (1. - from.edge_pos)) as u32;
+        let extra_end_cost = (self.graph[to.edge].distance as f32 * to.edge_pos) as u32;
+        distance += extra_start_cost + extra_end_cost;
 
         GraphPath::new(distance, points)
+    }
+
+    /// Find the shortest path length from a single starting point to multiple destinations.
+    /// This method is more perfomant than calculating each path individually, however only the distance is
+    /// returned, unlike shortest_path()
+    pub fn shortest_path_multi(&self, from: &ProjectedPoint, to: &Vec<ProjectedPoint>) -> Vec<u32> {
+        // Prepare starting node
+        let start_node = self.graph.edge_endpoints(from.edge).unwrap().1;
+        let extra_start_cost =
+            (self.graph[from.edge].distance as f32 * (1. - from.edge_pos)) as u32;
+
+        // Prepare ending nodes
+        let mut final_costs = vec![0; to.len()];
+        let mut remaining_ends: Vec<(usize, u32, NodeIndex, GeoPoint)> = to
+            .into_iter()
+            .enumerate()
+            .map(|(i, to)| {
+                let end_node = self.graph.edge_endpoints(to.edge).unwrap().0;
+                let end_node_point = self.graph[end_node];
+                let extra_end_cost = (self.graph[to.edge].distance as f32 * to.edge_pos) as u32;
+                (i, extra_end_cost, end_node, end_node_point)
+            })
+            .collect();
+
+        let mut visited = self.graph.visit_map();
+        let mut visit_next: BinaryHeap<Reverse<(u32, NodeIndex)>> = BinaryHeap::new();
+        let mut scores = HashMap::new();
+
+        fn estimate_cost(
+            carto: &Cartograph,
+            remaining_ends: &Vec<(usize, u32, NodeIndex, GeoPoint)>,
+            node: NodeIndex,
+        ) -> u32 {
+            remaining_ends
+                .iter()
+                .map(|(_, _, _, end_node_point)| {
+                    carto.graph[node].haversine_distance(end_node_point) as u32
+                })
+                .min()
+                .unwrap()
+        }
+
+        scores.insert(start_node, 0);
+        visit_next.push(Reverse((
+            estimate_cost(self, &remaining_ends, start_node),
+            start_node,
+        )));
+
+        while let Some(Reverse((_, node))) = visit_next.pop() {
+            while let Some(pos) = remaining_ends
+                .iter()
+                .position(|(_, _, end_node, _)| node == *end_node)
+            {
+                // Reached one final node
+                let (i, extra_end_cost, _, _) = remaining_ends.remove(pos);
+                let cost = scores[&node];
+                final_costs[i] = extra_start_cost + cost + extra_end_cost;
+
+                if remaining_ends.len() == 0 {
+                    return final_costs;
+                }
+            }
+
+            // Don't visit the same node several times, as the first time it was visited it was using
+            // the shortest available path.
+            if !visited.visit(node) {
+                continue;
+            }
+
+            // This lookup can be unwrapped without fear of panic since the node was necessarily scored
+            // before adding him to `visit_next`.
+            let node_score = scores[&node];
+
+            for edge in self.graph.edges(node) {
+                let next = edge.target();
+                if visited.is_visited(&next) {
+                    continue;
+                }
+
+                let mut next_score = node_score + edge.weight().distance;
+
+                use std::collections::hash_map::Entry::*;
+                match scores.entry(next) {
+                    Occupied(ent) => {
+                        let old_score = *ent.get();
+                        if next_score < old_score {
+                            *ent.into_mut() = next_score;
+                        } else {
+                            next_score = old_score;
+                        }
+                    }
+                    Vacant(ent) => {
+                        ent.insert(next_score);
+                    }
+                }
+
+                let next_estimate_score = next_score + estimate_cost(self, &remaining_ends, next);
+                visit_next.push(Reverse((next_estimate_score, next)));
+            }
+        }
+
+        final_costs
     }
 
     /// Read a list of delta-encoded values
@@ -261,5 +366,22 @@ mod test {
         let res = carto.shortest_path(&from, &to);
         assert_eq!(res.distance, 12124);
         assert_eq!(res.points.len(), 111);
+    }
+
+    #[test]
+    fn shortest_path_multi() {
+        let carto = get_carto();
+
+        let from = carto.project(&GeoPoint::from_degrees(42.553210, 1.588908));
+        let to1 = carto.project(&GeoPoint::from_degrees(42.564440, 1.685042));
+        let to2 = carto.project(&GeoPoint::from_degrees(42.440226, 1.492084));
+        let to3 = carto.project(&GeoPoint::from_degrees(42.500441, 1.519031));
+        let to = vec![to1, to2, to3];
+
+        let single_distances: Vec<u32> = to
+            .iter()
+            .map(|to| carto.shortest_path(&from, to).distance)
+            .collect();
+        assert_eq!(carto.shortest_path_multi(&from, &to), single_distances);
     }
 }
