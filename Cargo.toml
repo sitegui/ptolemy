@@ -25,6 +25,8 @@ serde = "1.0"
 polyline = "0.7"
 geo-types = "0.4"
 
-[workspace]
+[profile.release]
+debug = true
 
+[workspace]
 members = ["py_ptolemy"]
