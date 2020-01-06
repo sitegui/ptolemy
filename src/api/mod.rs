@@ -9,17 +9,13 @@ use std::path::Path;
 #[get("/route/v1/driving/{coordinates}")]
 async fn route(coords: web::Path<Coordinates>, carto: web::Data<Cartograph>) -> impl Responder {
     // Project the points
-    let waypoints: Vec<_> = coords
-        .0
-        .iter()
-        .map(|point| carto.project(point).unwrap())
-        .collect();
+    let waypoints: Vec<_> = coords.0.iter().map(|point| carto.project(point)).collect();
 
     // Calculate each path and accumulate all them
     let mut route_points: Vec<GeoPoint> = Vec::new();
     let mut distance = 0;
     for points in waypoints.windows(2) {
-        let graph_path = carto.shortest_path(&points[0], &points[1]).unwrap();
+        let graph_path = carto.shortest_path(&points[0], &points[1]);
         distance += graph_path.distance;
         route_points.extend(graph_path.points);
     }

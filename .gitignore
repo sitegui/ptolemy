@@ -2,3 +2,8 @@ target
 data
 notes.md
 .ipynb_checkpoints
+
+# cargo flamegraph
+flamegraph.svg
+perf.data
+perf.data.old

@@ -93,21 +93,16 @@ impl Cartograph {
 
     /// Compute the shortest path between two points, expressed in (lat, lon)
     #[text_signature = "(from, to, /)"]
-    pub fn shortest_path(&self, from: (f64, f64), to: (f64, f64)) -> Option<RoutePath> {
+    pub fn shortest_path(&self, from: (f64, f64), to: (f64, f64)) -> RoutePath {
         // Project nodes
-        let from = self
-            .inner
-            .project(&GeoPoint::from_degrees(from.0, from.1))
-            .unwrap();
-        let to = self
-            .inner
-            .project(&GeoPoint::from_degrees(to.0, to.1))
-            .unwrap();
+        let from = self.inner.project(&GeoPoint::from_degrees(from.0, from.1));
+        let to = self.inner.project(&GeoPoint::from_degrees(to.0, to.1));
 
-        self.inner.shortest_path(&from, &to).map(|res| RoutePath {
-            distance: res.distance,
-            geometry: res.polyline,
-        })
+        let path = self.inner.shortest_path(&from, &to);
+        RoutePath {
+            distance: path.distance,
+            geometry: path.polyline,
+        }
     }
 }
 

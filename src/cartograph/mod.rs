@@ -138,58 +138,57 @@ impl Cartograph {
 
     /// Find the arc that is closest to a given point. This is usually the first step before being able to
     /// walk the graph searching for shortest paths.
-    pub fn project(&self, point: &GeoPoint) -> Option<ProjectedPoint> {
+    pub fn project(&self, point: &GeoPoint) -> ProjectedPoint {
         let xy = point.web_mercator_project();
-        self.rtree.nearest_neighbor(&xy).map(|r_tree_element| {
-            // Convert result to GeoPoint
-            let projected = GeoPoint::from_web_mercator(r_tree_element.nearest_point(&xy));
-            // Get source and target geo points
-            let edge_index = r_tree_element.data;
-            let (source, target) = self.graph.edge_endpoints(edge_index).unwrap();
-            let source = self.graph[source];
-            let target = self.graph[target];
+        let r_tree_element = self.rtree.nearest_neighbor(&xy).unwrap();
 
-            // Calculate the ratio over the edge where the result is
-            let dist_to_source = projected.haversine_distance(&source);
-            let dist_to_target = projected.haversine_distance(&target);
-            let edge_pos = (dist_to_source / (dist_to_source + dist_to_target)) as f32;
+        // Convert result to GeoPoint
+        let projected = GeoPoint::from_web_mercator(r_tree_element.nearest_point(&xy));
+        // Get source and target geo points
+        let edge_index = r_tree_element.data;
+        let (source, target) = self.graph.edge_endpoints(edge_index).unwrap();
+        let source = self.graph[source];
+        let target = self.graph[target];
 
-            ProjectedPoint {
-                original: point.clone(),
-                projected,
-                edge: edge_index,
-                edge_pos,
-            }
-        })
+        // Calculate the ratio over the edge where the result is
+        let dist_to_source = projected.haversine_distance(&source);
+        let dist_to_target = projected.haversine_distance(&target);
+        let edge_pos = (dist_to_source / (dist_to_source + dist_to_target)) as f32;
+
+        ProjectedPoint {
+            original: point.clone(),
+            projected,
+            edge: edge_index,
+            edge_pos,
+        }
     }
 
     /// Find the shortest path between two projected points. Use project() to generate them
-    pub fn shortest_path(&self, from: &ProjectedPoint, to: &ProjectedPoint) -> Option<GraphPath> {
+    pub fn shortest_path(&self, from: &ProjectedPoint, to: &ProjectedPoint) -> GraphPath {
         // Run A* search from graph nodes
         let start_node = self.graph.edge_endpoints(from.edge).unwrap().1;
         let end_node = self.graph.edge_endpoints(to.edge).unwrap().0;
         let end_node_point = self.graph[end_node];
-        let search_res = astar(
+        let (mut distance, nodes) = astar(
             &self.graph,
             start_node,
             |node| node == end_node,
             |edge_ref| edge_ref.weight().distance,
             |node| self.graph[node].haversine_distance(&end_node_point) as u32,
-        );
+        )
+        .unwrap();
 
-        search_res.map(|(mut distance, nodes)| {
-            // Build final sequence of geo points
-            let mut points = Vec::with_capacity(nodes.len() + 2);
-            points.push(from.projected);
-            points.extend(nodes.into_iter().map(|node| self.graph[node]));
-            points.push(to.projected);
+        // Build final sequence of geo points
+        let mut points = Vec::with_capacity(nodes.len() + 2);
+        points.push(from.projected);
+        points.extend(nodes.into_iter().map(|node| self.graph[node]));
+        points.push(to.projected);
 
-            // Add initial and final segment distances
-            distance += (self.graph[from.edge].distance as f32 * (1. - from.edge_pos)) as u32;
-            distance += (self.graph[to.edge].distance as f32 * to.edge_pos) as u32;
+        // Add initial and final segment distances
+        distance += (self.graph[from.edge].distance as f32 * (1. - from.edge_pos)) as u32;
+        distance += (self.graph[to.edge].distance as f32 * to.edge_pos) as u32;
 
-            GraphPath::new(distance, points)
-        })
+        GraphPath::new(distance, points)
     }
 
     /// Read a list of delta-encoded values
@@ -234,7 +233,7 @@ mod test {
 
         // Project to a road nearby
         let p = GeoPoint::from_degrees(42.552221, 1.586691);
-        let res = carto.project(&p).unwrap();
+        let res = carto.project(&p);
         assert_eq!(res.original, p);
         assert_eq!(res.projected, GeoPoint::from_degrees(42.553210, 1.588908));
         assert_eq!(res.edge, EdgeIndex::new(4199));
@@ -246,7 +245,7 @@ mod test {
 
         // Project to source node
         let source = carto.graph[carto.graph.edge_endpoints(res.edge).unwrap().0];
-        let res_source = carto.project(&source).unwrap();
+        let res_source = carto.project(&source);
         assert_eq!(res_source.projected, source);
         assert_eq!(res_source.edge, res.edge);
         assert_eq!(res_source.edge_pos, 0.);
@@ -256,14 +255,10 @@ mod test {
     fn shortest_path() {
         let carto = get_carto();
 
-        let from = carto
-            .project(&GeoPoint::from_degrees(42.553210, 1.588908))
-            .unwrap();
-        let to = carto
-            .project(&GeoPoint::from_degrees(42.564440, 1.685042))
-            .unwrap();
+        let from = carto.project(&GeoPoint::from_degrees(42.553210, 1.588908));
+        let to = carto.project(&GeoPoint::from_degrees(42.564440, 1.685042));
 
-        let res = carto.shortest_path(&from, &to).unwrap();
+        let res = carto.shortest_path(&from, &to);
         assert_eq!(res.distance, 12124);
         assert_eq!(res.points.len(), 111);
     }
