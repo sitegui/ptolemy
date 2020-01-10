@@ -82,7 +82,7 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
                         from: seg_start.id,
                         to: node_id,
                         road_level,
-                        distance: distance as u32,
+                        distance: distance.round() as u32,
                     });
                 }
                 if direction.reverse {
@@ -90,7 +90,7 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
                         from: node_id,
                         to: seg_start.id,
                         road_level,
-                        distance: distance as u32,
+                        distance: distance.round() as u32,
                     });
                 }
             }
