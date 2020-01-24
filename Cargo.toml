@@ -24,6 +24,7 @@ failure = "0.1.6"
 serde = "1.0"
 polyline = "0.7"
 geo-types = "0.4"
+page_size = "0.4"
 
 [profile.release]
 debug = true

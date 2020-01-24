@@ -22,7 +22,7 @@ pub fn generate<P: AsRef<Path>>(
     let mmap = unsafe { Mmap::from_path(&input_file)? };
     let reader = MmapBlobReader::new(&mmap);
     let size = fs::metadata(&input_file)?.len();
-    let blobs: Vec<MmapBlob> = reader.collect::<Result<_>>()?;
+    let mut blobs: Vec<MmapBlob> = reader.collect::<Result<_>>()?;
     timer.msg(format!(
         "Loaded {} blobs from {}",
         format_num(blobs.len()),
@@ -31,7 +31,7 @@ pub fn generate<P: AsRef<Path>>(
 
     // Load nodes info
     let inital_len = blobs.len();
-    let (nodes, blobs) = parser::node::parse_blobs(blobs, num_threads);
+    let nodes = parser::node::parse_blobs(&mut blobs, num_threads);
     timer.msg(format!(
         "Loaded {} nodes (of which, {} barriers) from {} blobs",
         format_num(nodes.len()),
@@ -54,6 +54,8 @@ pub fn generate<P: AsRef<Path>>(
         format_num(graph.node_len()),
         format_num(graph.edge_len())
     ));
+
+    return Ok(());
 
     // Prune nodes
     let node_len = graph.node_len();

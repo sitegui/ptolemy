@@ -3,7 +3,9 @@ use super::disk_vec::DiskVec;
 use crate::utils::GeoPoint;
 use std::mem::replace;
 use std::ops::Range;
-use std::ops::{Index, IndexMut};
+
+/// How many system memory pages to allocate per section
+const PAGES_PER_SECTION: usize = 1024;
 
 pub type OSMNodeId = i64;
 
@@ -26,204 +28,340 @@ impl OSMNode {
     }
 }
 
-/// Helper type to build a `Nodes` storage. The nodes should be inserted in ascending id order.
-/// This will be checked at insertion time
+/// A helper struct that is used to build the main node database.
+/// The nodes should be inserted in blocks of ascending order of `id`,
+/// matching how the OSM block are encoded.
 pub struct NodesBuilder {
-    // Store partially filled pages
-    partial_page: DiskVec<OSMNode>,
-    partial_index: IndexEntry,
-    prev_id: OSMNodeId,
-    page_size: usize,
-    index_entry_size: usize,
+    ids_per_page: usize,
+    ids_curr_page: usize,
+    partial_section: NodesSection,
+    last_id: OSMNodeId,
+    page_min_id: Option<OSMNodeId>,
+    page_section_ids_start: usize,
+    sections: Vec<NodesSection>,
+    index_entries: Vec<IndexProto>,
     len: usize,
     barrier_len: usize,
-    // Store finished values
-    pages: Vec<DiskVec<OSMNode>>,
-    index: Vec<IndexEntry>,
-}
-
-/// An efficient Node storage, using anonymous memory maps as backstorage.
-/// You cannot build it directly, instead use `NodesBuilder`
-pub struct Nodes {
-    /// The list of pages (note: this is not related to a "memory page")
-    /// The nodes in each page are sorted in ascending order and all the pages are globally sorted as well.
-    pages: Vec<DiskVec<OSMNode>>,
-    /// An index over the node ids to allow for very fast access and also translation from node id to global offset
-    index: Vec<IndexEntry>,
-    len: usize,
-    /// Just for stats: the number of barrier nodes
-    barrier_len: usize,
-}
-
-/// Each index entry map a range of node ids to a range in a single page.
-/// One index entry will never cross pages boundaries. This makes using this index
-/// more ergonomic.
-#[derive(Clone, Debug)]
-struct IndexEntry {
-    min_id: OSMNodeId,
-    page: usize,
-    page_range: Range<usize>,
-    // The total number of nodes before this entry
-    global_offset: usize,
-}
-
-impl IndexEntry {
-    fn new_partial(page: usize, page_start: usize, global_offset: usize) -> Self {
-        Self {
-            min_id: 0,
-            page,
-            page_range: page_start..page_start,
-            global_offset,
-        }
-    }
-
-    fn finish(&mut self, page: &DiskVec<OSMNode>) {
-        self.min_id = page[self.page_range.start].id;
-        self.page_range.end = page.len();
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-struct SearchAnswer {
-    page: usize,
-    page_offset: usize,
-    global_offset: usize,
 }
 
 impl NodesBuilder {
-    /// Create a new builder that will try to pack up to `nodes_per_page` in the same memmap region
-    pub fn new(page_size: usize, index_entry_size: usize) -> Self {
-        Self {
-            partial_page: DiskVec::new(page_size).unwrap(),
-            partial_index: IndexEntry::new_partial(0, 0, 0),
-            prev_id: std::i64::MIN,
-            page_size,
-            index_entry_size,
-            barrier_len: 0,
+    pub fn new() -> Self {
+        let id_size = std::mem::size_of::<OSMNodeId>();
+        assert_eq!(
+            page_size::get() % id_size,
+            0,
+            "For performance reasons, the system's page size must be a multiple of {}",
+            id_size
+        );
+        let ids_per_page = page_size::get() / id_size;
+        let capacity = ids_per_page * PAGES_PER_SECTION;
+        Self::with_opts(ids_per_page, capacity)
+    }
+
+    fn with_opts(ids_per_page: usize, capacity: usize) -> Self {
+        NodesBuilder {
+            ids_per_page,
+            ids_curr_page: 0,
+            partial_section: NodesSection::new(capacity),
+            last_id: std::i64::MIN,
+            page_min_id: None,
+            page_section_ids_start: 0,
+            sections: Vec::new(),
+            index_entries: Vec::new(),
             len: 0,
-            pages: Vec::new(),
-            index: Vec::new(),
+            barrier_len: 0,
         }
     }
 
-    /// Add a new node. Will panic if its id is not greater that all others
+    /// Index a new node
     pub fn push(&mut self, node: OSMNode) {
-        assert!(node.id > self.prev_id);
+        // Sanity check
+        assert!(node.id > self.last_id);
+        self.last_id = node.id;
 
-        self.prev_id = node.id;
+        if self.ids_curr_page == self.ids_per_page {
+            // This page is full: commit it
+            self.finish_block();
+        }
+
+        if self.page_min_id.is_none() {
+            // Store the first id of the page
+            self.page_min_id = Some(node.id);
+        }
+
+        if self.partial_section.full() {
+            // This section is full: commit it
+            let new_partial_section = NodesSection::new(self.partial_section.capacity());
+            let section = replace(&mut self.partial_section, new_partial_section);
+            self.sections.push(section);
+            self.page_section_ids_start = 0;
+        }
+
+        self.partial_section.push(node);
+        self.ids_curr_page += 1;
         self.len += 1;
         if node.barrier {
             self.barrier_len += 1;
         }
-        self.partial_page.push(node);
-
-        if self.partial_page.len() == self.partial_page.capacity() {
-            // Commit index
-            let new_partial_index = IndexEntry::new_partial(self.pages.len() + 1, 0, self.len);
-            self.partial_index.finish(&self.partial_page);
-            self.index
-                .push(replace(&mut self.partial_index, new_partial_index));
-
-            // Commit this page
-            let new_partial_page = DiskVec::new(self.page_size).unwrap();
-            self.pages
-                .push(replace(&mut self.partial_page, new_partial_page));
-        } else if self.partial_page.len() - self.partial_index.page_range.start
-            == self.index_entry_size
-        {
-            // Commit index
-            let new_partial_index =
-                IndexEntry::new_partial(self.pages.len(), self.partial_page.len(), self.len);
-            self.partial_index.finish(&self.partial_page);
-            self.index
-                .push(replace(&mut self.partial_index, new_partial_index));
-        }
     }
 
-    /// Finish the construction of the node storage
-    pub fn build(mut self) -> Nodes {
-        // Commit any pending value
-        if self.partial_page.len() > 0 {
-            self.partial_index.finish(&self.partial_page);
-            self.index.push(self.partial_index);
-            self.pages.push(self.partial_page);
+    /// Signal the end of a block of contigous node `id`s, that is,
+    /// there are no other nodes that will have an `id` in the range of the
+    /// finished block. This does not mean the whole integer space was covered,
+    /// there can be holes, but those holes must not represent valid nodes
+    pub fn finish_block(&mut self) {
+        if self.ids_curr_page == 0 {
+            // Nop
+            return;
         }
 
-        Nodes {
-            pages: self.pages,
-            index: self.index,
-            len: self.len,
-            barrier_len: self.barrier_len,
-        }
+        // Create index
+        self.index_entries.push(IndexProto {
+            min_id: self.page_min_id.unwrap(),
+            section: self.sections.len(),
+            section_nodes_offset: self.partial_section.len() - self.ids_curr_page,
+            section_ids_range: self.page_section_ids_start..self.partial_section.ids_len(),
+        });
+
+        // Pad ids
+        self.partial_section
+            .pad_ids(self.ids_per_page - self.ids_curr_page);
+
+        // Prepare state for new page
+        self.ids_curr_page = 0;
+        self.page_min_id = None;
+        self.page_section_ids_start = self.partial_section.ids_len();
+    }
+
+    /// Finish the builder, returning the final pieces
+    fn finish(mut self) -> (Vec<NodesSection>, Vec<IndexProto>) {
+        self.finish_block();
+        let mut sections = self.sections;
+        sections.push(self.partial_section);
+        (sections, self.index_entries)
     }
 }
 
+/// The immutable OSM nodes database, using memmap to allow for automatic pagination and
+/// providing fast queries
+pub struct Nodes {
+    sections: Vec<NodesSection>,
+    index: Index,
+    len: usize,
+    barrier_len: usize,
+}
+
 impl Nodes {
-    /// Search a node by its id
-    /// You can also use nodes[node_id] if you want to panic if the node is not found
-    pub fn get(&self, id: OSMNodeId) -> Option<&OSMNode> {
-        self.search(id)
-            .map(move |ans| &self.pages[ans.page][ans.page_offset])
+    /// Create the final database from potentially many partial builders
+    pub fn from_builders(builders: Vec<NodesBuilder>) -> Self {
+        // Collect the info from all builders
+        let mut all_sections = Vec::new();
+        let mut all_index_entries = Vec::new();
+        let mut len = 0;
+        let mut barrier_len = 0;
+        for builder in builders {
+            len += builder.len;
+            barrier_len += builder.barrier_len;
+            let (sections, mut index_entries) = builder.finish();
+
+            // Increment section pointers
+            for entry in &mut index_entries {
+                entry.section += all_sections.len();
+            }
+
+            all_sections.extend(sections);
+            all_index_entries.extend(index_entries);
+        }
+
+        println!(
+            "sections={}, index={}",
+            all_sections.len(),
+            all_index_entries.len()
+        );
+        Nodes {
+            sections: all_sections,
+            index: Index::from_entries(all_index_entries),
+            len,
+            barrier_len,
+        }
     }
 
-    /// Search a node by its id
-    /// You can also use nodes[node_id] if you want to panic if the node is not found
-    pub fn get_mut(&mut self, id: OSMNodeId) -> Option<&mut OSMNode> {
-        self.search(id)
-            .map(move |ans| &mut self.pages[ans.page][ans.page_offset])
-    }
-
-    /// Return a global offset for a given `id`. It represents the node position in the
-    /// sorted list of all the ids.
-    /// The offset can change when new pages are added
+    /// Convert the `id` to a sequential offset, if it exists
     pub fn offset(&self, id: OSMNodeId) -> Option<usize> {
-        self.search(id).map(|ans| ans.global_offset)
+        self.search(id).map(|(meta, i)| meta.nodes_offset + i)
     }
 
+    /// Retrieve a node point information from its `id`, if it exists
+    pub fn point(&self, id: OSMNodeId) -> Option<GeoPoint> {
+        self.search(id).map(|(meta, i)| {
+            let section = &self.sections[meta.section];
+            let offset = meta.section_nodes_offset + i;
+            section.points[offset]
+        })
+    }
+
+    /// Retrieve a node information from its `id`, if it exists
+    pub fn node(&self, id: OSMNodeId) -> Option<OSMNode> {
+        self.search(id).map(|(meta, i)| {
+            let section = &self.sections[meta.section];
+            let offset = meta.section_nodes_offset + i;
+            OSMNode {
+                id,
+                point: section.points[offset],
+                barrier: section.barriers.get_bit(offset),
+            }
+        })
+    }
+
+    /// The total number of indexed nodes
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// The total number of indexed nodes that are barriers
     pub fn barrier_len(&self) -> usize {
         self.barrier_len
     }
 
-    /// If this `id` exists in the storage, return the page and the offset inside it
-    fn search(&self, id: OSMNodeId) -> Option<SearchAnswer> {
-        // First, find which index entry could have it
-        let entry_i = match self.index.binary_search_by_key(&id, |entry| entry.min_id) {
-            Err(0) => {
-                // `id` is less than the least entry
-                return None;
+    fn search(&self, id: OSMNodeId) -> Option<(IndexMeta, usize)> {
+        // Search the index for the page
+        self.index.search(id).and_then(|meta| {
+            let section_ids = &self.sections[meta.section].ids;
+            let page_ids = &section_ids[meta.section_ids_range.clone()];
+
+            // Search the page for the node
+            match page_ids.binary_search(&id) {
+                Err(_) => None,
+                Ok(i) => Some((meta, i)),
             }
-            Err(i) => i - 1, // search into the previous entry
-            Ok(i) => i,
-        };
-        let entry = &self.index[entry_i];
+        })
+    }
+}
 
-        // Then, find the node in the page
-        let page_range = &self.pages[entry.page][entry.page_range.clone()];
-        page_range
-            .binary_search_by_key(&id, |node| node.id)
-            .ok()
-            .map(|entry_offset| SearchAnswer {
-                page: entry.page,
-                page_offset: entry.page_range.start + entry_offset,
-                global_offset: entry.global_offset + entry_offset,
+// ---
+// Private stuff
+// ---
+
+/// The partial construction of an index entry. See Index for a full description on the fields
+#[derive(Debug)]
+struct IndexProto {
+    min_id: OSMNodeId,
+    section: usize,
+    section_nodes_offset: usize,
+    section_ids_range: Range<usize>,
+}
+
+/// Store nodes data in a columnar format
+struct NodesSection {
+    /// The node ids, but holes can happen to garantee that blocks will always start
+    /// on page boundaries. The holes are filled with zeros
+    ids: DiskVec<OSMNodeId>,
+    /// The node latitude and longitude packed with no holes, that is:
+    /// points.len() <= ids.len()
+    points: DiskVec<GeoPoint>,
+    /// The node's barrier flag, represented as one bit per node, packed with no holes
+    barriers: DiskBitVec,
+}
+
+impl NodesSection {
+    fn new(capacity: usize) -> Self {
+        NodesSection {
+            ids: DiskVec::new(capacity).unwrap(),
+            points: DiskVec::new(capacity).unwrap(),
+            barriers: DiskBitVec::zeros(capacity).unwrap(),
+        }
+    }
+
+    fn push(&mut self, node: OSMNode) {
+        self.barriers.set_bit(self.points.len(), node.barrier);
+        self.points.push(node.point);
+        self.ids.push(node.id);
+    }
+
+    fn pad_ids(&mut self, len: usize) {
+        for _ in 0..len {
+            self.ids.push(0);
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.ids.len() == self.ids.capacity()
+    }
+
+    fn capacity(&self) -> usize {
+        self.ids.capacity()
+    }
+
+    fn ids_len(&self) -> usize {
+        self.ids.len()
+    }
+
+    fn len(&self) -> usize {
+        self.points.len()
+    }
+}
+
+/// Index ranges of nodes sections, storing the minimum known id of each page.
+/// To minimize page-faults, each index entry is aligned to a system page.
+/// Also, to maximize cache locality in the usage of this structure, the min ids
+/// are stored in a contiguous form and the other meta-information are stored
+/// separated-ly, with matching vector positions
+struct Index {
+    min_ids: Vec<OSMNodeId>,
+    metas: Vec<IndexMeta>,
+}
+
+#[derive(Clone)]
+struct IndexMeta {
+    /// How many nodes appear before this one in all pages
+    nodes_offset: usize,
+    /// The position of this section in the nodes structure
+    section: usize,
+    /// How many nodes appear before this one in the pages of this section
+    section_nodes_offset: usize,
+    /// The range of the ids inside the section. It is aligned to the system's page size
+    section_ids_range: Range<usize>,
+}
+
+impl Index {
+    /// Build the final index structure from intermediate representation
+    fn from_entries(mut index_entries: Vec<IndexProto>) -> Self {
+        // Sort entries
+        index_entries.sort_by_key(|entry| entry.min_id);
+
+        // Build metas
+        let mut nodes_offset = 0;
+        let metas: Vec<_> = index_entries
+            .iter()
+            .map(|entry| {
+                let prev_nodes_offset = nodes_offset;
+                nodes_offset += entry.section_ids_range.end - entry.section_ids_range.start;
+                IndexMeta {
+                    nodes_offset: prev_nodes_offset,
+                    section: entry.section,
+                    section_nodes_offset: entry.section_nodes_offset,
+                    section_ids_range: entry.section_ids_range.clone(),
+                }
             })
-    }
-}
+            .collect();
 
-impl Index<OSMNodeId> for Nodes {
-    type Output = OSMNode;
-    fn index(&self, id: OSMNodeId) -> &Self::Output {
-        self.get(id).unwrap()
+        // Final assembly
+        Index {
+            min_ids: index_entries
+                .into_iter()
+                .map(|entry| entry.min_id)
+                .collect(),
+            metas,
+        }
     }
-}
 
-impl IndexMut<OSMNodeId> for Nodes {
-    fn index_mut(&mut self, id: OSMNodeId) -> &mut Self::Output {
-        self.get_mut(id).unwrap()
+    /// Search the index for a given id
+    fn search(&self, id: OSMNodeId) -> Option<IndexMeta> {
+        match self.min_ids.binary_search(&id) {
+            Err(i) if i == 0 => None,
+            Err(i) => Some(self.metas[i - 1].clone()),
+            Ok(i) => Some(self.metas[i].clone()),
+        }
     }
 }
 
@@ -231,47 +369,60 @@ impl IndexMut<OSMNodeId> for Nodes {
 mod test {
     use super::*;
 
-    fn build_nodes() -> Nodes {
-        let mut builder = NodesBuilder::new(5, 3);
-        for id in (0..300).step_by(10) {
+    #[test]
+    fn single_builder() {
+        let mut builder = NodesBuilder::with_opts(5, 15);
+        for id in 0..30 {
             builder.push(OSMNode::with_id(id));
         }
-        builder.build()
-    }
+        let nodes = Nodes::from_builders(vec![builder]);
 
-    #[test]
-    fn builder() {
-        let nodes = build_nodes();
-
-        assert_eq!(nodes.pages.len(), 6);
-        assert_eq!(nodes.index.len(), 12); // 2 per page
-        assert_eq!(nodes.len(), 30);
-
-        assert_eq!(nodes.pages[3][2].id, (5 * 3 + 2) * 10);
-        assert_eq!(nodes.index[7].min_id, 180);
-        assert_eq!(nodes.index[7].page, 3);
-        assert_eq!(nodes.index[7].page_range, 3..5);
-        assert_eq!(nodes.index[7].global_offset, 18);
-    }
-
-    #[test]
-    #[should_panic]
-    fn unsorted() {
-        let mut builder = NodesBuilder::new(5, 3);
-        builder.push(OSMNode::with_id(10));
-        builder.push(OSMNode::with_id(9));
-    }
-
-    #[test]
-    fn get() {
-        let nodes = build_nodes();
-
-        for id in (0..300).step_by(10) {
-            assert_eq!(nodes.get(id).map(|node| node.id), Some(id));
-            assert_eq!(nodes.offset(id), Some(id as usize / 10), "offset({})", id);
+        for id in 0..30 {
+            assert_eq!(nodes.offset(id), Some(id as usize));
         }
+    }
 
-        assert!(nodes.get(-17).is_none());
-        assert!(nodes.get(55).is_none());
+    #[test]
+    fn single_builder_and_blocks() {
+        let mut builder = NodesBuilder::with_opts(5, 15);
+        let blocks = vec![0..10, 20..30, 100..110];
+        let offsets = vec![0..10, 10..20, 20..30];
+        for block in &blocks {
+            for id in block.clone() {
+                builder.push(OSMNode::with_id(id));
+            }
+            builder.finish_block();
+        }
+        let nodes = Nodes::from_builders(vec![builder]);
+
+        for (block, offsets) in blocks.into_iter().zip(offsets.into_iter()) {
+            for (id, offset) in block.zip(offsets) {
+                assert_eq!(nodes.offset(id), Some(offset));
+            }
+        }
+    }
+
+    #[test]
+    fn multi_builder_and_blocks() {
+        let mut builders = vec![
+            NodesBuilder::with_opts(5, 15),
+            NodesBuilder::with_opts(5, 15),
+        ];
+        let blocks = vec![0..10, 20..30, 100..110, 200..250];
+        let offsets = vec![0..10, 10..20, 20..30, 30..80];
+        for (i, block) in blocks.iter().enumerate() {
+            let builder = &mut builders[i % 2];
+            for id in block.clone() {
+                builder.push(OSMNode::with_id(id));
+            }
+            builder.finish_block();
+        }
+        let nodes = Nodes::from_builders(builders);
+
+        for (block, offsets) in blocks.into_iter().zip(offsets.into_iter()) {
+            for (id, offset) in block.zip(offsets) {
+                assert_eq!(nodes.offset(id), Some(offset));
+            }
+        }
     }
 }

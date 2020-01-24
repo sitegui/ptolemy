@@ -132,11 +132,11 @@ mod test {
     use super::*;
 
     fn get_nodes(num: usize) -> Nodes {
-        let mut nodes_builder = NodesBuilder::new(7, 3);
+        let mut nodes_builder = NodesBuilder::new();
         for id in 0..num as i64 {
             nodes_builder.push(OSMNode::with_id(id));
         }
-        NodesBuilder::build(vec![nodes_builder])
+        Nodes::from_builders(vec![nodes_builder])
     }
 
     #[test]

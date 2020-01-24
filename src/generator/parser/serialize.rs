@@ -30,11 +30,11 @@ pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> 
         .node_references()
         .map(|(index, info)| {
             let node_id = info.id;
-            let osm_node = graph.nodes[node_id];
+            let point = graph.nodes.point(node_id).unwrap();
             Node {
                 index: index.index() as i32,
-                lat: osm_node.point.lat.as_micro_degrees(),
-                lon: osm_node.point.lon.as_micro_degrees(),
+                lat: point.lat.as_micro_degrees(),
+                lon: point.lon.as_micro_degrees(),
             }
         })
         .collect();

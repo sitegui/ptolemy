@@ -61,7 +61,7 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
 
     // Handle first node
     let node_id = it.next().unwrap();
-    let node = &nodes[node_id];
+    let node = nodes.node(node_id).unwrap();
     let mut seg_start = node;
     let mut prev_node = node;
     let mut distance: f64 = 0.;
@@ -69,7 +69,7 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
 
     // Handle the other nodes
     for node_id in it {
-        let node = &nodes[node_id];
+        let node = nodes.node(node_id).unwrap();
         distance += prev_node.point.haversine_distance(&node.point);
         prev_node = node;
         blocked |= node.barrier;
