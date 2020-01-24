@@ -173,11 +173,6 @@ impl Nodes {
             all_index_entries.extend(index_entries);
         }
 
-        println!(
-            "sections={}, index={}",
-            all_sections.len(),
-            all_index_entries.len()
-        );
         Nodes {
             sections: all_sections,
             index: Index::from_entries(all_index_entries),

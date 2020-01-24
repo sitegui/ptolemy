@@ -3,18 +3,26 @@ use std::time::Instant;
 /// Simple log helper that prepends messages with the elapsed time
 pub struct DebugTime {
     start: Instant,
+    prev: Instant,
 }
 
 impl DebugTime {
     pub fn new() -> Self {
-        DebugTime {
-            start: Instant::now(),
-        }
+        let start = Instant::now();
+        DebugTime { start, prev: start }
     }
 
     pub fn msg<T: std::fmt::Display>(&mut self, s: T) {
-        let dt = Instant::now() - self.start;
-        println!("[{:6.1}s] {}", dt.as_secs_f32(), s);
+        let now = Instant::now();
+        let total_dt = now - self.start;
+        let prev_dt = now - self.prev;
+        self.prev = now;
+        println!(
+            "[{:6.1}s ({:+5.1}s)] {}",
+            total_dt.as_secs_f32(),
+            prev_dt.as_secs_f32(),
+            s
+        );
     }
 }
 
