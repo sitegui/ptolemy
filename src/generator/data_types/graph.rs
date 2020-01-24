@@ -1,4 +1,4 @@
-use super::diskvec::DiskVec;
+use super::disk_vec::DiskVec;
 use super::node::{Nodes, OSMNodeId};
 use petgraph;
 use petgraph::algo::kosaraju_scc;

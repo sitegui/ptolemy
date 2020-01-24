@@ -38,6 +38,10 @@ impl<T> DiskVec<T> {
         self.capacity
     }
 
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
     pub unsafe fn as_ptr(&self) -> *const T {
         self.mem.as_ptr() as *const T
     }

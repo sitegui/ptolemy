@@ -1,4 +1,5 @@
-use super::diskvec::DiskVec;
+use super::disk_bit_vec::DiskBitVec;
+use super::disk_vec::DiskVec;
 use crate::utils::GeoPoint;
 use std::mem::replace;
 use std::ops::Range;
