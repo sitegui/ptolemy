@@ -7,7 +7,11 @@ use osmpbf::{BlobDecode, MmapBlob};
 
 /// Extract the nodes from a list of blobs, sequentially.
 /// Returns the junctions storage
-pub fn parse_blobs<'a>(blobs: &[MmapBlob], nodes: &'a Nodes, num_threads: usize) -> Junctions<'a> {
+pub fn parse_blobs<'a>(
+    blobs: &[MmapBlob],
+    nodes: &'a Nodes,
+    num_threads: usize,
+) -> (Junctions, usize) {
     if num_threads == 1 {
         parse_blobs_sequential(blobs, nodes)
     } else {
@@ -16,35 +20,49 @@ pub fn parse_blobs<'a>(blobs: &[MmapBlob], nodes: &'a Nodes, num_threads: usize)
 }
 
 /// Parse the raw ways from a given compressed blob
-fn parse_blob(blob: &MmapBlob, builder: &mut JunctionsBuilder) {
+fn parse_blob(blob: &MmapBlob, nodes: &Nodes, junctions: &Junctions) -> usize {
+    let mut num_ways = 0;
     match blob.decode().unwrap() {
         BlobDecode::OsmData(block) => {
             for group in block.groups() {
                 for way in group.ways() {
                     // Only consider ways that are "roads"
                     if super::parse_road_level(&way).is_some() {
-                        builder.push_way(way);
+                        let node_ids = way.refs();
+                        let len = node_ids.len();
+
+                        for (i, id) in node_ids.enumerate() {
+                            let offset = nodes.offset(id).unwrap();
+                            if i == 0 || i == len - 1 {
+                                junctions.handle_junction(offset);
+                            } else {
+                                junctions.handle_internal(offset);
+                            }
+                        }
+                        num_ways += 1;
                     }
                 }
             }
         }
         _ => {}
     }
+    num_ways
 }
 
-fn parse_blobs_sequential<'a>(blobs: &[MmapBlob], nodes: &'a Nodes) -> Junctions<'a> {
-    let mut builder = JunctionsBuilder::new(&nodes);
+fn parse_blobs_sequential<'a>(blobs: &[MmapBlob], nodes: &'a Nodes) -> (Junctions, usize) {
+    let mut num_ways = 0;
+    let junctions = Junctions::new(nodes.len());
     for blob in blobs {
-        parse_blob(blob, &mut builder);
+        num_ways += parse_blob(blob, nodes, &junctions);
     }
-    builder.build()
+    (junctions, num_ways)
 }
 
 fn parse_blobs_parallel<'a, 'b>(
     blobs: &'b [MmapBlob],
     nodes: &'a Nodes,
     num_threads: usize,
-) -> Junctions<'a> {
+) -> (Junctions, usize) {
     // Create a work queue that will be filled once by this thread and will be
     // consumed by the worker ones.
     let (task_sender, task_receiver) = crossbeam::bounded(blobs.len());
@@ -53,28 +71,32 @@ fn parse_blobs_parallel<'a, 'b>(
     }
     drop(task_sender);
 
-    crossbeam::scope(|scope| {
+    let junctions = Junctions::new(nodes.len());
+    let num_ways = crossbeam::scope(|scope| {
         // Spawn the threads
         let mut threads = Vec::new();
+        let mut num_ways = 0;
         for _ in 0..num_threads {
             // Create the channel endpoints for this thread
             let task_receiver = task_receiver.clone();
+            let junctions_ref = &junctions;
             let thread = scope.spawn(move |_| {
-                let mut builder = JunctionsBuilder::new(nodes);
+                let mut num_ways = 0;
                 for blob in task_receiver {
-                    parse_blob(blob, &mut builder);
+                    num_ways += parse_blob(blob, nodes, junctions_ref);
                 }
-                builder
+                num_ways
             });
             threads.push(thread);
         }
 
         // Collect all results
-        let mut builder = JunctionsBuilder::new(nodes);
         for thread in threads {
-            builder.merge(thread.join().unwrap());
+            num_ways += thread.join().unwrap();
         }
-        builder.build()
+        num_ways
     })
-    .unwrap()
+    .unwrap();
+
+    (junctions, num_ways)
 }

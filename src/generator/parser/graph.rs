@@ -9,7 +9,7 @@ use osmpbf::{BlobDecode, MmapBlob, Way};
 pub fn parse_blobs<'a>(
     blobs: &[MmapBlob],
     nodes: &'a Nodes,
-    junctions: &'a Junctions<'a>,
+    junctions: &'a Junctions,
     num_threads: usize,
 ) -> Graph<'a> {
     if num_threads == 1 {
@@ -28,7 +28,7 @@ struct Arc {
 }
 
 /// Parse the raw ways from a given compressed blob
-fn parse_blob<'a>(blob: &MmapBlob, nodes: &'a Nodes, junctions: &'a Junctions<'a>) -> Vec<Arc> {
+fn parse_blob<'a>(blob: &MmapBlob, nodes: &'a Nodes, junctions: &'a Junctions) -> Vec<Arc> {
     let mut arcs = Vec::new();
     match blob.decode().unwrap() {
         BlobDecode::OsmData(block) => {
@@ -49,7 +49,7 @@ fn parse_blob<'a>(blob: &MmapBlob, nodes: &'a Nodes, junctions: &'a Junctions<'a
 /// Then, the segment is defined as "blocked" if any of the nodes is a barrier.
 /// Finally, an unblocked segment will push new arcs to the graph. It can push up
 /// to two arcs if the way is both-ways.
-fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs: &mut Vec<Arc>) {
+fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions, arcs: &mut Vec<Arc>) {
     // Parse tags
     let road_level = match super::parse_road_level(&way) {
         None => return,
@@ -74,7 +74,7 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
         prev_node = node;
         blocked |= node.barrier;
 
-        if junctions.query(node_id) {
+        if junctions.get(node.offset) == NodeType::Junction {
             if !blocked {
                 // Commit segment
                 if direction.direct {
@@ -107,7 +107,7 @@ fn parse_way<'a>(way: Way, nodes: &'a Nodes, junctions: &'a Junctions<'a>, arcs:
 fn parse_blobs_sequential<'a>(
     blobs: &[MmapBlob],
     nodes: &'a Nodes,
-    junctions: &'a Junctions<'a>,
+    junctions: &'a Junctions,
 ) -> Graph<'a> {
     let mut graph = Graph::new(nodes);
     for blob in blobs {
@@ -121,7 +121,7 @@ fn parse_blobs_sequential<'a>(
 fn parse_blobs_parallel<'a>(
     blobs: &[MmapBlob],
     nodes: &'a Nodes,
-    junctions: &'a Junctions<'a>,
+    junctions: &'a Junctions,
     num_threads: usize,
 ) -> Graph<'a> {
     crossbeam::scope(|scope| {

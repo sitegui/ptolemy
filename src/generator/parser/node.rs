@@ -32,6 +32,7 @@ fn parse_blob(blob: &MmapBlob, builder: &mut NodesBuilder) -> bool {
                     has_nodes = true;
                     builder.push(OSMNode {
                         id: node.id(),
+                        offset: 0,
                         point: GeoPoint::from_degrees(node.lat(), node.lon()),
                         barrier: super::parse_barrier(node.tags()),
                     });
@@ -41,6 +42,7 @@ fn parse_blob(blob: &MmapBlob, builder: &mut NodesBuilder) -> bool {
                     has_nodes = true;
                     builder.push(OSMNode {
                         id: dense_node.id,
+                        offset: 0,
                         point: GeoPoint::from_degrees(dense_node.lat(), dense_node.lon()),
                         barrier: super::parse_barrier(dense_node.tags()),
                     });

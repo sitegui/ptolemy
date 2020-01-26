@@ -7,24 +7,21 @@ use std::ops::Range;
 /// How many system memory pages to allocate per section
 const PAGES_PER_SECTION: usize = 1024;
 
-pub type OSMNodeId = i64;
+pub type NodeId = i64;
 
 /// Represent a basic OSM node, with some parsed fields
 #[derive(Copy, Clone, Debug)]
 pub struct OSMNode {
-    pub id: OSMNodeId,
-    /// Global offset, not used when writing to the databse, only when returning from it
-    pub offset: usize,
+    pub id: NodeId,
     pub point: GeoPoint,
     pub barrier: bool,
 }
 
 impl OSMNode {
     #[cfg(test)]
-    pub fn with_id(id: OSMNodeId) -> OSMNode {
+    pub fn with_id(id: NodeId) -> OSMNode {
         OSMNode {
             id,
-            offset: 0,
             point: GeoPoint::from_degrees(0., 0.),
             barrier: false,
         }
@@ -38,8 +35,8 @@ pub struct NodesBuilder {
     ids_per_page: usize,
     ids_curr_page: usize,
     partial_section: NodesSection,
-    last_id: OSMNodeId,
-    page_min_id: Option<OSMNodeId>,
+    last_id: NodeId,
+    page_min_id: Option<NodeId>,
     page_section_ids_start: usize,
     sections: Vec<NodesSection>,
     index_entries: Vec<IndexProto>,
@@ -49,7 +46,7 @@ pub struct NodesBuilder {
 
 impl NodesBuilder {
     pub fn new() -> Self {
-        let id_size = std::mem::size_of::<OSMNodeId>();
+        let id_size = std::mem::size_of::<NodeId>();
         assert_eq!(
             page_size::get() % id_size,
             0,
@@ -185,12 +182,12 @@ impl Nodes {
     }
 
     /// Convert the `id` to a sequential offset, if it exists
-    pub fn offset(&self, id: OSMNodeId) -> Option<usize> {
+    pub fn offset(&self, id: NodeId) -> Option<usize> {
         self.search(id).map(|(meta, i)| meta.nodes_offset + i)
     }
 
     /// Retrieve a node point information from its `id`, if it exists
-    pub fn point(&self, id: OSMNodeId) -> Option<GeoPoint> {
+    pub fn point(&self, id: NodeId) -> Option<GeoPoint> {
         self.search(id).map(|(meta, i)| {
             let section = &self.sections[meta.section];
             let offset = meta.section_nodes_offset + i;
@@ -199,13 +196,12 @@ impl Nodes {
     }
 
     /// Retrieve a node information from its `id`, if it exists
-    pub fn node(&self, id: OSMNodeId) -> Option<OSMNode> {
+    pub fn node(&self, id: NodeId) -> Option<OSMNode> {
         self.search(id).map(|(meta, i)| {
             let section = &self.sections[meta.section];
             let offset = meta.section_nodes_offset + i;
             OSMNode {
                 id,
-                offset: meta.nodes_offset + i,
                 point: section.points[offset],
                 barrier: section.barriers.get_bit(offset),
             }
@@ -222,7 +218,7 @@ impl Nodes {
         self.barrier_len
     }
 
-    fn search(&self, id: OSMNodeId) -> Option<(IndexMeta, usize)> {
+    fn search(&self, id: NodeId) -> Option<(IndexMeta, usize)> {
         // Search the index for the page
         self.index.search(id).and_then(|meta| {
             let section_ids = &self.sections[meta.section].ids;
@@ -244,7 +240,7 @@ impl Nodes {
 /// The partial construction of an index entry. See Index for a full description on the fields
 #[derive(Debug)]
 struct IndexProto {
-    min_id: OSMNodeId,
+    min_id: NodeId,
     section: usize,
     section_nodes_offset: usize,
     section_ids_range: Range<usize>,
@@ -254,7 +250,7 @@ struct IndexProto {
 struct NodesSection {
     /// The node ids, but holes can happen to garantee that blocks will always start
     /// on page boundaries. The holes are filled with zeros
-    ids: DiskVec<OSMNodeId>,
+    ids: DiskVec<NodeId>,
     /// The node latitude and longitude packed with no holes, that is:
     /// points.len() <= ids.len()
     points: DiskVec<GeoPoint>,
@@ -305,12 +301,13 @@ impl NodesSection {
 /// Also, to maximize cache locality in the usage of this structure, the min ids
 /// are stored in a contiguous form and the other meta-information are stored
 /// separated-ly, with matching vector positions
+#[derive(Debug)]
 struct Index {
-    min_ids: Vec<OSMNodeId>,
+    min_ids: Vec<NodeId>,
     metas: Vec<IndexMeta>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct IndexMeta {
     /// How many nodes appear before this one in all pages
     nodes_offset: usize,
@@ -355,7 +352,7 @@ impl Index {
     }
 
     /// Search the index for a given id
-    fn search(&self, id: OSMNodeId) -> Option<IndexMeta> {
+    fn search(&self, id: NodeId) -> Option<IndexMeta> {
         match self.min_ids.binary_search(&id) {
             Err(i) if i == 0 => None,
             Err(i) => Some(self.metas[i - 1].clone()),
