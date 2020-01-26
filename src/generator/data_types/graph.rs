@@ -1,5 +1,5 @@
-use super::disk_vec::DiskVec;
-use super::node::{Nodes, OSMNodeId};
+use super::node::Nodes;
+use crate::utils::GeoPoint;
 use petgraph;
 use petgraph::algo::kosaraju_scc;
 use petgraph::visit::{EdgeRef, VisitMap};
@@ -7,37 +7,34 @@ use rstar::{primitives::PointWithData, RTree};
 
 pub type NodeIndex = petgraph::graph::NodeIndex<u32>;
 
-pub struct Graph<'a> {
+pub struct Graph {
     pub graph: petgraph::Graph<NodeInfo, EdgeInfo, petgraph::Directed>,
-    // Map OSM node to the id used in this graph
-    node_indexes: DiskVec<NodeIndex>,
-    pub nodes: &'a Nodes,
 }
 
-impl<'a> Graph<'a> {
+impl<'a> Graph {
     /// Create a new empty graph that will accept nodes from `Nodes`.
     pub fn new(nodes: &'a Nodes) -> Self {
-        Self {
-            graph: petgraph::Graph::new(),
-            node_indexes: DiskVec::full(nodes.len(), NodeIndex::end()).unwrap(),
-            nodes,
+        let mut graph = petgraph::Graph::with_capacity(nodes.len(), 0);
+
+        // Create nodes
+        for &point in nodes.points() {
+            graph.add_node(NodeInfo { point });
         }
+
+        Self { graph }
     }
 
     /// Add a new arc to the graph. If the arc already exists, keep the highest road level and
     /// least distance. This happens quite a bit with roundabouts that are not correctly tagged
-    pub fn push_arc(&mut self, from: OSMNodeId, to: OSMNodeId, road_level: u8, distance: u32) {
-        let index_from = self.ensure_node(from);
-        let index_to = self.ensure_node(to);
-
-        if let Some(edge) = self.graph.find_edge(index_from, index_to) {
+    pub fn push_arc(&mut self, from: NodeIndex, to: NodeIndex, road_level: u8, distance: u32) {
+        if let Some(edge) = self.graph.find_edge(from, to) {
             let edge = &mut self.graph[edge];
             edge.road_level = edge.road_level.max(road_level);
             edge.distance = edge.distance.min(distance);
         } else {
             self.graph.add_edge(
-                index_from,
-                index_to,
+                from,
+                to,
                 EdgeInfo {
                     road_level,
                     distance,
@@ -122,10 +119,9 @@ impl<'a> Graph<'a> {
             base_nodes
                 .into_iter()
                 .map(|base_index| {
-                    let base_id = self.graph[base_index].id;
                     PointWithData::new(
-                        (base_index, base_id),
-                        self.nodes.point(base_id).unwrap().web_mercator_project(),
+                        base_index,
+                        self.graph[base_index].point.web_mercator_project(),
                     )
                 })
                 .collect(),
@@ -137,14 +133,12 @@ impl<'a> Graph<'a> {
                 .into_iter()
                 .map(|node_index| {
                     // Detect the best arc from this node
-                    let node_id = self.graph[node_index].id;
-                    let point = self.nodes.point(node_id).unwrap();
-                    let (base_index, base_id) = base_index
+                    let point = self.graph[node_index].point;
+                    let base_index = base_index
                         .nearest_neighbor(&point.web_mercator_project())
                         .unwrap()
                         .data;
-                    let distance =
-                        point.haversine_distance(&self.nodes.point(base_id).unwrap()) as u32;
+                    let distance = point.haversine_distance(&self.graph[base_index].point) as u32;
                     (distance, node_index, base_index)
                 })
                 .min_by_key(|t| t.0)
@@ -172,24 +166,12 @@ impl<'a> Graph<'a> {
     pub fn edge_len(&self) -> usize {
         self.graph.edge_count()
     }
-
-    /// Ensure the node is part of the graph and return its index
-    fn ensure_node(&mut self, id: OSMNodeId) -> NodeIndex {
-        let offset = self.nodes.offset(id).unwrap();
-        let mut idx = self.node_indexes[offset];
-        if idx == NodeIndex::end() {
-            // Add to graph
-            idx = self.graph.add_node(NodeInfo { id });
-            self.node_indexes[offset] = idx;
-        }
-        idx
-    }
 }
 
 /// Extra data associated to each node
 #[derive(Copy, Clone, Debug)]
 pub struct NodeInfo {
-    pub id: OSMNodeId,
+    pub point: GeoPoint,
 }
 
 /// Extra data associated to each edge

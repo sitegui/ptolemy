@@ -1,5 +1,6 @@
 use crate::generator::data_types::*;
 use byteorder::{LittleEndian, WriteBytesExt};
+use crossbeam;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
@@ -11,9 +12,10 @@ use std::path::Path;
 /// Write the final cartography graph to disk
 pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> {
     // Open file
-    let mut writer = GzEncoder::new(File::create(&file_path)?, Compression::default());
+    let mut writer = File::create(&file_path)?;
 
     // Write headers
+    writer.write_all(b"PTOLEMY-v2")?;
     writer.write_u32::<LittleEndian>(graph.node_len() as u32)?;
     writer.write_u32::<LittleEndian>(graph.edge_len() as u32)?;
 
@@ -28,21 +30,13 @@ pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> 
     let mut nodes: Vec<Node> = graph
         .graph
         .node_references()
-        .map(|(index, info)| {
-            let node_id = info.id;
-            let point = graph.nodes.point(node_id).unwrap();
-            Node {
-                index: index.index() as i32,
-                lat: point.lat.as_micro_degrees(),
-                lon: point.lon.as_micro_degrees(),
-            }
+        .map(|(index, info)| Node {
+            index: index.index() as i32,
+            lat: info.point.lat.as_micro_degrees(),
+            lon: info.point.lon.as_micro_degrees(),
         })
         .collect();
     nodes.sort_by_key(|node| (node.lat, node.lon));
-
-    // Write node info
-    write_delta_encode(&mut writer, nodes.iter().map(|node| node.lat))?;
-    write_delta_encode(&mut writer, nodes.iter().map(|node| node.lon))?;
 
     // Extract remap of node indexes:
     // node_index_map[old_index] = new_index
@@ -70,28 +64,40 @@ pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> 
         .collect();
     edges.sort_by_key(|edge| (edge.source, edge.target));
 
-    // Write edges
-    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.source))?;
-    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.target))?;
-    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.distance))?;
-    write_delta_encode(&mut writer, edges.iter().map(|edge| edge.road_level))?;
+    crossbeam::scope(|scope| {
+        let nodes_ref = &nodes;
+        let edges_ref = &edges;
 
-    // Finish
-    writer.finish()?;
-    Ok(())
+        // Compress all columns in parallel
+        let threads = vec![
+            scope.spawn(move |_| compress(nodes_ref.iter().map(|node| node.lat))),
+            scope.spawn(move |_| compress(nodes_ref.iter().map(|node| node.lat))),
+            scope.spawn(move |_| compress(edges_ref.iter().map(|edge| edge.source))),
+            scope.spawn(move |_| compress(edges_ref.iter().map(|edge| edge.target))),
+            scope.spawn(move |_| compress(edges_ref.iter().map(|edge| edge.distance))),
+            scope.spawn(move |_| compress(edges_ref.iter().map(|edge| edge.road_level))),
+        ];
+
+        // But write them sequentially
+        for thread in threads {
+            let column = thread.join().unwrap();
+            writer.write_u64::<LittleEndian>(column.len() as u64)?;
+            writer.write_all(column.as_ref())?;
+        }
+        Ok(())
+    })
+    .unwrap()
 }
 
-/// Delta-encode the values and write them
-fn write_delta_encode<IT: Iterator<Item = i32>, W: Write>(
-    writer: &mut W,
-    mut values: IT,
-) -> io::Result<()> {
+/// Compress an iterator of i32 using delta encoding + gzip
+fn compress(mut values: impl Iterator<Item = i32>) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     let mut prev = values.next().unwrap();
-    writer.write_i32::<LittleEndian>(prev)?;
+    encoder.write_i32::<LittleEndian>(prev).unwrap();
     for value in values {
         let delta = value - prev;
         prev = value;
-        writer.write_i32::<LittleEndian>(delta)?;
+        encoder.write_i32::<LittleEndian>(delta).unwrap();
     }
-    Ok(())
+    encoder.finish().unwrap()
 }

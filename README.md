@@ -31,20 +31,20 @@ In development, feel free to join! Main features and future roadmap:
 2. Execute the `generator` to extract the data from the raw format and create the final graph. For example, for Brazil:
     ```
     $ cargo run --release -- generate -i data/brazil-latest.osm.pbf -o data/brazil.ptolemy
-    [   0.0s] Will use 16 threads
-    [   0.0s] Loaded 17.5k blobs from 835.2MiB
-    [   4.9s] Loaded 129.1M nodes (of which, 21.9k barriers) from 16.1k blobs
-    [   7.6s] Loaded 3.7M ways
-    [   7.6s] Detected 6.8M junctions
-    [  12.9s] Create graph with 6.7M nodes and 16.8M edges
-    [  13.4s] Pruned unreachable nodes
-    [  13.4s] Graph now has 6.5M nodes (-190.9k) and 16.4M edges (-355.5k)
-    [  14.5s] Weakly-connected components were strongly connected
-    [  14.5s] Graph now has 16.5M edges (+70.9k)
-    [  19.7s] All smaller components were strongly connected with the main one
-    [  19.7s] Graph now has 16.5M edges (+172)
-    [  47.6s] Wrote results to data/brazil.ptolemy, size = 93.2MiB
-    [  47.6s] Done! #DFTBA
+    [   0.0s ( +0.0s)] Will use 16 threads
+    [   0.0s ( +0.0s)] Loaded 17.5k blobs from 835.2MiB
+    [   0.2s ( +0.2s)] File has 16.1k nodes blobs, 1.4k ways blobs and 26 relations blobs
+    [   3.0s ( +2.8s)] Found 6.8M junctions and 23.5M internal nodes from 3.7M ways
+    [   4.4s ( +1.4s)] Loaded info about 30.3M nodes, of which 16.0k are barriers
+    [   6.8s ( +2.4s)] Create graph with 30.3M nodes and 16.8M edges
+    [   9.1s ( +2.3s)] Pruned unreachable nodes
+    [   9.1s ( +0.0s)] Graph now has 6.5M nodes (-23.7M) and 16.4M edges (-355.5k)
+    [  10.5s ( +1.5s)] Weakly-connected components were strongly connected
+    [  10.5s ( +0.0s)] Graph now has 16.5M edges (+70.9k)
+    [  14.9s ( +4.4s)] All smaller components were strongly connected with the main one
+    [  14.9s ( +0.0s)] Graph now has 16.5M edges (+172)
+    [  25.5s (+10.5s)] Wrote results to data/brazil.ptolemy, size = 76.4MiB
+    [  25.5s ( +0.0s)] Done! #DFTBA
     ```
 3. Execute the `api` to serve the resquests with `cargo run --release -- api -i data/brazil.ptolemy`
 

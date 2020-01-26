@@ -20,42 +20,52 @@ pub fn generate<P: AsRef<Path>>(
 
     // Read input file
     let mmap = unsafe { Mmap::from_path(&input_file)? };
-    let reader = MmapBlobReader::new(&mmap);
     let size = fs::metadata(&input_file)?.len();
-    let mut blobs: Vec<MmapBlob> = reader.collect::<Result<_>>()?;
+    let file = data_types::OSMFile::from_mmap(&mmap)?;
     timer.msg(format!(
         "Loaded {} blobs from {}",
-        format_num(blobs.len()),
+        format_num(file.blobs.len()),
         format_bytes(size)
     ));
 
-    // Load nodes info
-    let inital_len = blobs.len();
-    let nodes = parser::node::parse_blobs(&mut blobs, num_threads);
+    // Classify file
+    let file = data_types::OSMClassifiedFile::from_file(file);
     timer.msg(format!(
-        "Loaded {} nodes (of which, {} barriers) from {} blobs",
-        format_num(nodes.len()),
-        format_num(nodes.barrier_len()),
-        format_num(inital_len - blobs.len())
+        "File has {} nodes blobs, {} ways blobs and {} relations blobs",
+        format_num(file.nodes_blobs.len()),
+        format_num(file.ways_blobs.len()),
+        format_num(file.relations_blobs.len()),
     ));
 
-    // Load ways info to detect junctions
-    let junctions = parser::junction::parse_blobs(&blobs, &nodes, num_threads);
-    timer.msg(format!("Loaded {} ways", format_num(junctions.ways_len())));
+    // Detect used nodes and junctions
+    let (junctions, num_ways) = parser::junction::parse_file(&file, num_threads);
+    let stats = junctions.stats();
     timer.msg(format!(
-        "Detected {} junctions",
-        format_num(junctions.len()),
+        "Found {} junctions and {} internal nodes from {} ways",
+        format_num(stats.1),
+        format_num(stats.0),
+        format_num(num_ways),
+    ));
+
+    // Load node info
+    let nodes = parser::node::parse_file(&file, &junctions, num_threads);
+    timer.msg(format!(
+        "Loaded info about {} nodes, of which {} are barriers",
+        format_num(nodes.len()),
+        format_num(nodes.barrier_len())
     ));
 
     // Load ways again to create arcs
-    let mut graph = parser::graph::parse_blobs(&blobs, &nodes, &junctions, num_threads);
+    let mut graph = parser::graph::parse_file(&file, &nodes, &junctions, num_threads);
     timer.msg(format!(
         "Create graph with {} nodes and {} edges",
         format_num(graph.node_len()),
         format_num(graph.edge_len())
     ));
-
-    return Ok(());
+    drop(file);
+    drop(nodes);
+    drop(junctions);
+    drop(mmap);
 
     // Prune nodes
     let node_len = graph.node_len();
@@ -101,43 +111,4 @@ pub fn generate<P: AsRef<Path>>(
     timer.msg("Done! #DFTBA");
 
     Ok(())
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_generate_single_thread() {
-        generate(
-            Some(1),
-            "test_data/andorra-latest.osm.pbf",
-            "data/andorra-single-thread.ptolemy",
-        )
-        .unwrap();
-
-        assert_eq!(
-            fs::metadata("data/andorra-single-thread.ptolemy")
-                .unwrap()
-                .len(),
-            37345
-        );
-    }
-
-    #[test]
-    fn test_generate_multi_thread() {
-        generate(
-            Some(4),
-            "test_data/andorra-latest.osm.pbf",
-            "data/andorra-multi-thread.ptolemy",
-        )
-        .unwrap();
-
-        assert_eq!(
-            fs::metadata("data/andorra-multi-thread.ptolemy")
-                .unwrap()
-                .len(),
-            37345
-        );
-    }
 }
