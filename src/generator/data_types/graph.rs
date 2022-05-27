@@ -3,7 +3,7 @@ use crate::utils::GeoPoint;
 use petgraph;
 use petgraph::algo::kosaraju_scc;
 use petgraph::visit::{EdgeRef, VisitMap};
-use rstar::{primitives::PointWithData, RTree};
+use rstar::{primitives::GeomWithData, RTree};
 
 pub type NodeIndex = petgraph::graph::NodeIndex<u32>;
 
@@ -119,9 +119,9 @@ impl<'a> Graph {
             base_nodes
                 .into_iter()
                 .map(|base_index| {
-                    PointWithData::new(
-                        base_index,
+                    GeomWithData::new(
                         self.graph[base_index].point.web_mercator_project(),
+                        base_index,
                     )
                 })
                 .collect(),

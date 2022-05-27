@@ -71,7 +71,7 @@ pub fn serialize<P: AsRef<Path>>(graph: &Graph, file_path: P) -> io::Result<()> 
         // Compress all columns in parallel
         let threads = vec![
             scope.spawn(move |_| compress(nodes_ref.iter().map(|node| node.lat))),
-            scope.spawn(move |_| compress(nodes_ref.iter().map(|node| node.lat))),
+            scope.spawn(move |_| compress(nodes_ref.iter().map(|node| node.lon))),
             scope.spawn(move |_| compress(edges_ref.iter().map(|edge| edge.source))),
             scope.spawn(move |_| compress(edges_ref.iter().map(|edge| edge.target))),
             scope.spawn(move |_| compress(edges_ref.iter().map(|edge| edge.distance))),

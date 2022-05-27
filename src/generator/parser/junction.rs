@@ -52,7 +52,7 @@ fn parse_file_parallel<'a>(
 ) -> (Junctions, usize) {
     // Create a work queue that will be filled once by this thread and will be
     // consumed by the worker ones.
-    let (task_sender, task_receiver) = crossbeam::bounded(file.ways_blobs.len());
+    let (task_sender, task_receiver) = crossbeam::channel::bounded(file.ways_blobs.len());
     for blob in file.ways_blobs.iter() {
         task_sender.send(blob).unwrap();
     }
