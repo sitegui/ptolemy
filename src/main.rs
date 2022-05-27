@@ -4,35 +4,35 @@ mod generator;
 mod utils;
 
 use std::path::PathBuf;
-use structopt::StructOpt;
+use clap::Parser;
 
 /// This project exposes an API that calculates the shortest path in the road network, using data from OpenStreetMap.
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 enum Ptolemy {
     /// Generate a compatible cartography data from raw OpenStreetMap data
     Generate {
         /// How many threads to use. By default, will use all hyperthreads available
-        #[structopt(long)]
+        #[clap(long)]
         threads: Option<usize>,
 
         /// Input file, in the osm.pbf format
-        #[structopt(short, long, parse(from_os_str))]
+        #[clap(short, long, parse(from_os_str))]
         input: PathBuf,
 
         /// Output file. Usually with the extension `.ptolemy`
-        #[structopt(short, long, parse(from_os_str))]
+        #[clap(short, long, parse(from_os_str))]
         output: PathBuf,
     },
     /// Start the Ptolemy API service
     Api {
         /// Input file, in the ptolemy format
-        #[structopt(short, long, parse(from_os_str))]
+        #[clap(short, long, parse(from_os_str))]
         input: PathBuf,
     },
 }
 
 fn main() {
-    match Ptolemy::from_args() {
+    match Ptolemy::parse() {
         Ptolemy::Generate {
             threads,
             input,

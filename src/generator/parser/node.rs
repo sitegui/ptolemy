@@ -48,7 +48,7 @@ fn parse_file_parallel<'a>(
     num_threads: usize,
 ) -> Nodes {
     crossbeam::scope(|scope| {
-        let (task_sender, task_receiver) = crossbeam::bounded(file.nodes_blobs.len());
+        let (task_sender, task_receiver) = crossbeam::channel::bounded(file.nodes_blobs.len());
         for task in &file.nodes_blobs {
             task_sender.send(task).unwrap();
         }

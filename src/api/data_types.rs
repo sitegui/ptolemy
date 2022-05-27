@@ -1,5 +1,5 @@
 use crate::utils::GeoPoint;
-use failure::Fail;
+use thiserror::Error;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::fmt;
 use std::num::ParseFloatError;
@@ -11,33 +11,21 @@ use std::str::FromStr;
 pub struct Coordinates(pub Vec<GeoPoint>);
 
 /// Errors that can happen when parsin Coordinates from a String
-#[derive(Debug, Fail, PartialEq)]
+#[derive(Debug, Error, PartialEq)]
 pub enum ParseCoordinatesError {
-    #[fail(
-        display = "Expected at least {} lon_lat pairs, got {}. Use ';' to separate pairs",
-        expected, got
-    )]
+    #[error("Expected at least {} lon_lat pairs, got {}. Use ';' to separate pairs", expected, got)]
     NotEnoughLonLatPairs { got: usize, expected: usize },
-    #[fail(
-        display = "Missing latitude component in pair {}. Use ',' to separate longitude and latitude",
-        pair
-    )]
+    #[error("Missing latitude component in pair {}. Use ',' to separate longitude and latitude", pair)]
     MissingLat { pair: String },
-    #[fail(
-        display = "Too many values to parse in pair {}. Use ',' to separate longitude and latitude",
-        pair
-    )]
+    #[error("Too many values to parse in pair {}. Use ',' to separate longitude and latitude", pair)]
     ExtraValue { pair: String },
-    #[fail(display = "Could not parse pair {}: {}", pair, source)]
+    #[error("Could not parse pair {}: {}", pair, source)]
     InvalidFloat {
         pair: String,
-        #[cause]
+        #[source]
         source: ParseFloatError,
     },
-    #[fail(
-        display = "Value {} in pair {} is out of range, it should in [{}, {}]. Make sure to use the order longitude,latitude",
-        got, pair, expected_min, expected_max
-    )]
+    #[error("Value {} in pair {} is out of range, it should in [{}, {}]. Make sure to use the order longitude,latitude", got, pair, expected_min, expected_max)]
     InvalidRange {
         pair: String,
         got: f64,

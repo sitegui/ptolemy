@@ -115,14 +115,14 @@ fn parse_file_parallel<'a>(
     crossbeam::scope(|scope| {
         // Create a work queue that will be filled once by this thread and will be
         // consumed by the worker ones.
-        let (task_sender, task_receiver) = crossbeam::bounded(file.ways_blobs.len());
+        let (task_sender, task_receiver) = crossbeam::channel::bounded(file.ways_blobs.len());
         for task in &file.ways_blobs {
             task_sender.send(task).unwrap();
         }
         drop(task_sender);
 
         // Create a return channel, that will be used to return the created nodes of each blob
-        let (result_sender, result_receiver) = crossbeam::bounded(2 * num_threads);
+        let (result_sender, result_receiver) = crossbeam::channel::bounded(2 * num_threads);
 
         // Spawn the threads
         for _ in 0..num_threads {
