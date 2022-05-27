@@ -36,24 +36,26 @@ impl Cartograph {
         let mut timer = crate::utils::DebugTime::new();
 
         // Open file and read header
-        let mut file = GzDecoder::new(File::open(path)?);
+        let mut file = File::open(path)?;
+        let mut buf = [0; 10];
+        let _header = file.read(&mut buf[..])?;
         let num_nodes = file.read_u32::<LittleEndian>()? as usize;
         let num_edges = file.read_u32::<LittleEndian>()? as usize;
 
         // Read nodes and insert into graph
         let mut graph = Graph::new();
-        let latitudes = Cartograph::read_delta_encoded(&mut file, num_nodes)?;
-        let longitudes = Cartograph::read_delta_encoded(&mut file, num_nodes)?;
+        let latitudes = Cartograph::decompress(&mut file, num_nodes)?;
+        let longitudes = Cartograph::decompress(&mut file, num_nodes)?;
         for (lat, lon) in latitudes.into_iter().zip(longitudes.into_iter()) {
             graph.add_node(GeoPoint::from_micro_degrees(lat, lon));
         }
         timer.msg(format!("Read {} nodes", format_num(num_nodes)));
 
         // Read edges and insert into graph
-        let sources = Cartograph::read_delta_encoded(&mut file, num_edges)?;
-        let targets = Cartograph::read_delta_encoded(&mut file, num_edges)?;
-        let distances = Cartograph::read_delta_encoded(&mut file, num_edges)?;
-        let road_levels = Cartograph::read_delta_encoded(&mut file, num_edges)?;
+        let sources = Cartograph::decompress(&mut file, num_edges)?;
+        let targets = Cartograph::decompress(&mut file, num_edges)?;
+        let distances = Cartograph::decompress(&mut file, num_edges)?;
+        let road_levels = Cartograph::decompress(&mut file, num_edges)?;
         for (((source, target), distance), road_level) in sources
             .into_iter()
             .zip(targets.into_iter())
@@ -96,8 +98,8 @@ impl Cartograph {
     /// This function can return less than `max_num` even when there are more than that, please refer to the
     ///  PrioritySample trait to understand how sampling works.
     /// The returned values is a map from road_level to a list of edge indexes
-    pub fn sample_edges<'a>(
-        &'a self,
+    pub fn sample_edges(
+        &self,
         xy1: [f64; 2],
         xy2: [f64; 2],
         max_num: usize,
@@ -297,18 +299,25 @@ impl Cartograph {
     }
 
     /// Read a list of delta-encoded values
-    fn read_delta_encoded<R: Read>(reader: &mut R, len: usize) -> io::Result<Vec<i32>> {
-        let mut result = Vec::with_capacity(len);
+    fn decompress<R: Read>(reader: &mut R, len: usize) -> io::Result<Vec<i32>> {
+        let mut buf = vec![];
+        let length = reader.read_u64::<LittleEndian>()?;
+
+        let mut chunk = reader.take(length as u64);
+        let _ = chunk.read_to_end(&mut buf);
+
+        let mut decoder = GzDecoder::new(&buf[..]);
 
         // Read first
-        let mut prev = reader.read_i32::<LittleEndian>()?;
+        let mut result = Vec::with_capacity(len);
+        let mut prev = decoder.read_i32::<LittleEndian>()?;
         result.push(prev);
 
         // Read others
         for _ in 1..len {
-            let delta = reader.read_i32::<LittleEndian>()?;
-            result.push(prev + delta);
+            let delta = decoder.read_i32::<LittleEndian>()?;
             prev += delta;
+            result.push(prev);
         }
 
         Ok(result)
@@ -364,7 +373,7 @@ mod test {
         let to = carto.project(&GeoPoint::from_degrees(42.564440, 1.685042));
 
         let res = carto.shortest_path(&from, &to);
-        assert_eq!(res.distance, 12124);
+        assert_eq!(res.distance, 12183);
         assert_eq!(res.points.len(), 111);
     }
 
